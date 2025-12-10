@@ -1,0 +1,107 @@
+# ============================================
+# Sistema de Agendamento de Horário
+# ============================================
+
+# Arquivos Markdown (exceto README.md na raiz e subdiretórios)
+*.md
+!README.md
+# Permitir README.md em subdiretórios específicos
+!backend/README.md
+!frontend/README.md
+!backend/tests/README.md
+!backend/scripts/README.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build outputs
+dist/
+build/
+dist-ssr/
+*.local
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Uploads
+uploads/
+backend/uploads/
+frontend/uploads/
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker
+.dockerignore
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# Scripts de desenvolvimento (Windows)
+*.bat
+start.bat
+start_simples.bat
+instalar_dependencias.bat
+instalar_dependencias_sem_rust.bat
+atualizar_sqlalchemy.bat
+
+# Arquivos de configuração local
+config.local.json
+settings.local.json
+

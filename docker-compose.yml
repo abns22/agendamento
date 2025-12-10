@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # Serviço de Banco de Dados MySQL
+  db:
+    image: mysql:8.0
+    container_name: sistema-agendamento-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-agendamento_db}
+      MYSQL_USER: ${MYSQL_USER:-agendamento_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-agendamento_password}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      # Persistência de dados do MySQL
+      - mysql_data:/var/lib/mysql
+      # Scripts de inicialização (opcional)
+      - ./backend/scripts:/docker-entrypoint-initdb.d:ro
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: --default-authentication-plugin=mysql_native_password
+
+  # Serviço Backend (FastAPI)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sistema-agendamento-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      # Database
+      DATABASE_URL: mysql+aiomysql://${MYSQL_USER:-agendamento_user}:${MYSQL_PASSWORD:-agendamento_password}@db:3306/${MYSQL_DATABASE:-agendamento_db}
+      
+      # Security
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      
+      # Stripe (opcional)
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_ID: ${STRIPE_PRICE_ID:-}
+      
+      # WhatsApp (opcional)
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+      
+      # CORS - Permitir requisições do frontend
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost:5173"]}
+      
+      # File Uploads
+      UPLOAD_DIR: ${UPLOAD_DIR:-uploads}
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-5242880}
+    volumes:
+      # Persistência de uploads
+      - backend_uploads:/app/uploads
+    networks:
+      - app-network
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Serviço Frontend (React/Vite com Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sistema-agendamento-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    environment:
+      # Variáveis de ambiente do frontend (se necessário)
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    networks:
+      - app-network
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# Volumes nomeados para persistência de dados
+volumes:
+  mysql_data:
+    driver: local
+  backend_uploads:
+    driver: local
+
+# Rede para comunicação entre serviços
+networks:
+  app-network:
+    driver: bridge
+

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug - Rotas</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .info {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .error {
+            background: #ffe0e0;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 Debug - Sistema de Rotas</h1>
+    
+    <div class="section">
+        <h2>1. Informações Atuais</h2>
+        <div class="info" id="currentInfo"></div>
+    </div>
+
+    <div class="section">
+        <h2>2. Limpar Dados de Autenticação</h2>
+        <p>Use este botão para limpar tokens e dados de autenticação do localStorage:</p>
+        <button onclick="clearAuth()">Limpar Autenticação</button>
+        <div id="clearResult"></div>
+    </div>
+
+    <div class="section">
+        <h2>3. Testar Rotas</h2>
+        <button onclick="testRoute('/admin/login')">Ir para /admin/login</button>
+        <button onclick="testRoute('/admin/dashboard')">Ir para /admin/dashboard</button>
+        <button onclick="testRoute('/')">Ir para / (Home)</button>
+    </div>
+
+    <div class="section">
+        <h2>4. Verificar localStorage</h2>
+        <button onclick="checkLocalStorage()">Verificar localStorage</button>
+        <div id="localStorageInfo"></div>
+    </div>
+
+    <script>
+        function updateCurrentInfo() {
+            const info = document.getElementById('currentInfo');
+            info.innerHTML = `
+                <strong>URL Atual:</strong> ${window.location.href}<br>
+                <strong>Pathname:</strong> ${window.location.pathname}<br>
+                <strong>Hash:</strong> ${window.location.hash || '(nenhum)'}<br>
+                <strong>Search:</strong> ${window.location.search || '(nenhum)'}
+            `;
+        }
+
+        function clearAuth() {
+            const result = document.getElementById('clearResult');
+            try {
+                localStorage.removeItem('auth_token');
+                localStorage.removeItem('auth_user');
+                localStorage.removeItem('refresh_token');
+                result.innerHTML = '<div class="info">✅ Dados de autenticação limpos com sucesso!</div>';
+                setTimeout(() => {
+                    window.location.href = '/admin/login';
+                }, 1000);
+            } catch (error) {
+                result.innerHTML = `<div class="error">❌ Erro ao limpar: ${error.message}</div>`;
+            }
+        }
+
+        function testRoute(path) {
+            console.log('🧪 Testando rota:', path);
+            window.location.href = path;
+        }
+
+        function checkLocalStorage() {
+            const info = document.getElementById('localStorageInfo');
+            const authToken = localStorage.getItem('auth_token');
+            const authUser = localStorage.getItem('auth_user');
+            const refreshToken = localStorage.getItem('refresh_token');
+            
+            let html = '<div class="info">';
+            html += `<strong>auth_token:</strong> ${authToken ? '✅ Existe (' + authToken.substring(0, 20) + '...)' : '❌ Não existe'}<br>`;
+            html += `<strong>auth_user:</strong> ${authUser ? '✅ Existe' : '❌ Não existe'}<br>`;
+            html += `<strong>refresh_token:</strong> ${refreshToken ? '✅ Existe' : '❌ Não existe'}<br>`;
+            html += '</div>';
+            
+            if (authToken) {
+                html += '<div class="error">⚠️ Há um token no localStorage. Isso pode estar causando redirecionamento automático. Use o botão "Limpar Autenticação" acima.</div>';
+            }
+            
+            info.innerHTML = html;
+        }
+
+        // Atualizar informações ao carregar
+        updateCurrentInfo();
+        checkLocalStorage();
+    </script>
+</body>
+</html>
+
