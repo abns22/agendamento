@@ -1,0 +1,61 @@
+services:
+  # Backend FastAPI
+  - type: web
+    name: agendamento-backend
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT
+    rootDir: backend
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+        fromDatabase:
+          name: agendamento-mysql
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 30
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: 7
+      - key: CORS_ORIGINS
+        sync: false
+        value: '["https://agendamento-frontend.onrender.com"]'
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+
+  # Frontend React/Vite
+  - type: web
+    name: agendamento-frontend
+    env: static
+    region: oregon
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    rootDir: frontend
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+        value: https://agendamento-backend.onrender.com
+
+databases:
+  # MySQL Database
+  - name: agendamento-mysql
+    databaseName: agendamento_db
+    user: agendamento_user
+    plan: starter
+    region: oregon
+
