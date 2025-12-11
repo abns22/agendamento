@@ -35,6 +35,7 @@ services:
     rootDir: frontend
     envVars:
       - key: VITE_API_URL
+        # Domínio do Backend sem barra final - o Frontend adiciona /api/v1 no código
         value: https://agendamento-backend.onrender.com
     routes:
       - type: rewrite
