@@ -38,9 +38,9 @@ services:
 databases:
   # MySQL Database
   - name: agendamento-mysql
-    type: mysql
     databaseName: agendamento_db
     user: agendamento_user
     region: oregon
+    version: 8.0
     ipAllowList: []
 
