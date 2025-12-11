@@ -35,11 +35,12 @@ services:
       - key: VITE_API_URL
         value: https://agendamento-backend.onrender.com
 
-databases:
-  # MySQL Database
-  - name: agendamento-mysql
-    databaseType: mysql
-    mysqlVersion: 8.0
+  # MySQL Database Service
+  - type: pserv
+    name: agendamento-mysql
+    database:
+      name: agendamento_db
+      type: mysql
     plan: free
     region: oregon
 
