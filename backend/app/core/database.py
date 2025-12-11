@@ -1,5 +1,5 @@
 """
-Configuração e conexão com o banco de dados MySQL usando SQLAlchemy Async.
+Configuração e conexão com o banco de dados PostgreSQL usando SQLAlchemy Async.
 """
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base

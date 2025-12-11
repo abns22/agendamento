@@ -11,7 +11,7 @@ services:
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: agendamento-mysql
+          name: agendamento-postgres
           property: connectionString
       - key: SECRET_KEY
         generateValue: true
@@ -36,11 +36,11 @@ services:
         value: https://agendamento-backend.onrender.com
 
 databases:
-  # MySQL Database
-  - name: agendamento-mysql
+  # PostgreSQL Database
+  - name: agendamento-postgres
     databaseName: agendamento_db
     user: agendamento_user
     region: oregon
-    version: 8.0
+    version: 16
     ipAllowList: []
 

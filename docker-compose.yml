@@ -1,31 +1,29 @@
 version: '3.8'
 
 services:
-  # Serviço de Banco de Dados MySQL
+  # Serviço de Banco de Dados PostgreSQL
   db:
-    image: mysql:8.0
+    image: postgres:16
     container_name: sistema-agendamento-db
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-agendamento_db}
-      MYSQL_USER: ${MYSQL_USER:-agendamento_user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-agendamento_password}
+      POSTGRES_USER: ${POSTGRES_USER:-agendamento_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agendamento_password}
+      POSTGRES_DB: ${POSTGRES_DB:-agendamento_db}
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      # Persistência de dados do MySQL
-      - mysql_data:/var/lib/mysql
+      # Persistência de dados do PostgreSQL
+      - postgres_data:/var/lib/postgresql/data
       # Scripts de inicialização (opcional)
       - ./backend/scripts:/docker-entrypoint-initdb.d:ro
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agendamento_user} -d ${POSTGRES_DB:-agendamento_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    command: --default-authentication-plugin=mysql_native_password
 
   # Serviço Backend (FastAPI)
   backend:
@@ -38,7 +36,7 @@ services:
       - "${BACKEND_PORT:-8000}:8000"
     environment:
       # Database
-      DATABASE_URL: mysql+aiomysql://${MYSQL_USER:-agendamento_user}:${MYSQL_PASSWORD:-agendamento_password}@db:3306/${MYSQL_DATABASE:-agendamento_db}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agendamento_user}:${POSTGRES_PASSWORD:-agendamento_password}@db:5432/${POSTGRES_DB:-agendamento_db}
       
       # Security
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
@@ -102,7 +100,7 @@ services:
 
 # Volumes nomeados para persistência de dados
 volumes:
-  mysql_data:
+  postgres_data:
     driver: local
   backend_uploads:
     driver: local

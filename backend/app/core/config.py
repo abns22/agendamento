@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """Configurações da aplicação carregadas de variáveis de ambiente."""
     
     # Database
-    DATABASE_URL: str = "mysql+aiomysql://user:password@localhost:3306/agendamento_db"
+    DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost:5432/agendamento_db"
     
     # Security
     SECRET_KEY: str = "your-secret-key-change-in-production"
