@@ -6,10 +6,10 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copiar arquivos de dependências
-COPY package.json package-lock.json ./
+COPY package.json ./
 
 # Instalar dependências (incluindo devDependencies para o build)
-RUN npm ci
+RUN npm install
 
 # Copiar código fonte
 COPY . .
