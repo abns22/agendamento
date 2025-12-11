@@ -6,8 +6,9 @@ from sqlalchemy.orm import declarative_base
 from app.core.config import settings
 
 # Engine assíncrono
+# A URL do Render virá como 'postgresql://...', mudamos para 'postgresql+asyncpg://...'
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
     echo=True,  # Log SQL queries (desabilitar em produção)
     future=True,
 )
