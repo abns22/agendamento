@@ -36,10 +36,10 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://agendamento-backend.onrender.com
-    rewrites:
-      - from: /*
-        to: /index.html
-        status: 200
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
 
 databases:
   # PostgreSQL Database (Sintaxe Mínima)
