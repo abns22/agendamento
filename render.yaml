@@ -36,11 +36,10 @@ services:
         value: https://agendamento-backend.onrender.com
 
 databases:
-  # PostgreSQL Database
+  # PostgreSQL Database (Sintaxe Mínima)
   - name: agendamento-postgres
     databaseName: agendamento_db
     user: agendamento_user
     region: oregon
-    version: 16
     ipAllowList: []
 
