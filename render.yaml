@@ -40,6 +40,8 @@ databases:
   - name: agendamento-mysql
     databaseName: agendamento_db
     user: agendamento_user
+    databaseType: mysql
+    mysqlVersion: 8.0
     plan: free
     region: oregon
 
