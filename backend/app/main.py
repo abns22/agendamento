@@ -59,16 +59,33 @@ except Exception as e:
 
 # CORS - Configurar para permitir requisições do frontend
 # Parse CORS_ORIGINS se for string JSON do .env
+print(f"🔍 CORS_ORIGINS raw: {settings.CORS_ORIGINS}")
+print(f"🔍 Tipo de CORS_ORIGINS: {type(settings.CORS_ORIGINS)}")
+
 cors_origins = settings.CORS_ORIGINS
 if isinstance(cors_origins, str):
     import json
     try:
+        # Tentar parsear como JSON primeiro
         cors_origins = json.loads(cors_origins)
-    except:
+        print(f"✅ CORS_ORIGINS parseado como JSON: {cors_origins}")
+    except json.JSONDecodeError:
+        # Se falhar, tentar split por vírgula
         cors_origins = [origin.strip() for origin in cors_origins.split(',')]
+        print(f"✅ CORS_ORIGINS parseado como CSV: {cors_origins}")
+    except Exception as e:
+        print(f"❌ ERRO ao parsear CORS_ORIGINS: {e}")
+        # Fallback: usar lista padrão
+        cors_origins = ["https://agendamento-frontend-mpzb.onrender.com"]
+        print(f"⚠️ Usando CORS_ORIGINS padrão: {cors_origins}")
+
+# Garantir que é uma lista
+if not isinstance(cors_origins, list):
+    cors_origins = [str(cors_origins)]
 
 # Log para debug (remover em produção)
-print(f"🌐 CORS Origins configurados: {cors_origins}")
+print(f"🌐 CORS Origins finais configurados: {cors_origins}")
+print(f"🌐 Tipo final: {type(cors_origins)}")
 
 app.add_middleware(
     CORSMiddleware,
