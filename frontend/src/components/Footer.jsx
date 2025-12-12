@@ -18,7 +18,7 @@ const Footer = ({ className = '' }) => {
             <img 
               src="/logo.png" 
               alt="Synkhro" 
-              className="h-6 w-auto object-contain opacity-80"
+              className="h-10 w-auto object-contain opacity-80 rounded-lg transition-transform duration-300 hover:scale-110"
             />
             <span className="text-sm text-gray-600">
               Desenvolvido por <span className="font-semibold text-primary">Synkhro</span>

@@ -220,7 +220,7 @@ const DashboardLayout = ({ children }) => {
               <img 
                 src="/logo.png" 
                 alt="Synkhro" 
-                className="h-10 w-auto object-contain hidden sm:block"
+                className="h-16 w-auto object-contain hidden sm:block rounded-lg transition-transform duration-300 hover:scale-110"
               />
               
               <div>
