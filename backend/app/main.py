@@ -277,6 +277,9 @@ async def startup_event():
     """Evento de inicialização: cria as tabelas do banco de dados se não existirem."""
     print("🔧 Inicializando banco de dados...")
     try:
+        # Importar engine e Base novamente para garantir que estão disponíveis
+        from app.core.database import engine, Base
+        
         # Importar todos os modelos para garantir que estão registrados no Base.metadata
         from app.models import (
             Tenant, User, Service, ScheduleConfig, StopTime, Appointment,
