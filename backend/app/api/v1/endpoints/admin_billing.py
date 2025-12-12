@@ -176,7 +176,20 @@ async def create_checkout_session(
             )
         
         # URLs padrão se não fornecidas
-        frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:5173"
+        # Priorizar domínio de produção (synkhro.com.br) se disponível
+        frontend_url = "http://localhost:5173"  # Fallback padrão
+        if settings.CORS_ORIGINS:
+            # Buscar primeiro por domínio de produção
+            production_url = next(
+                (url for url in settings.CORS_ORIGINS if "synkhro.com.br" in url),
+                None
+            )
+            if production_url:
+                frontend_url = production_url
+            else:
+                # Se não encontrar, usar o primeiro da lista
+                frontend_url = settings.CORS_ORIGINS[0] if isinstance(settings.CORS_ORIGINS, list) else str(settings.CORS_ORIGINS)
+        
         success_url = request_data.success_url or f"{frontend_url}/admin/billing/success"
         cancel_url = request_data.cancel_url or f"{frontend_url}/admin/billing/cancel"
         
@@ -294,7 +307,20 @@ async def manage_subscription(
             )
         
         # URL padrão se não fornecida
-        frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:5173"
+        # Priorizar domínio de produção (synkhro.com.br) se disponível
+        frontend_url = "http://localhost:5173"  # Fallback padrão
+        if settings.CORS_ORIGINS:
+            # Buscar primeiro por domínio de produção
+            production_url = next(
+                (url for url in settings.CORS_ORIGINS if "synkhro.com.br" in url),
+                None
+            )
+            if production_url:
+                frontend_url = production_url
+            else:
+                # Se não encontrar, usar o primeiro da lista
+                frontend_url = settings.CORS_ORIGINS[0] if isinstance(settings.CORS_ORIGINS, list) else str(settings.CORS_ORIGINS)
+        
         return_url = request_data.return_url or f"{frontend_url}/admin/billing"
         
         # Criar sessão do portal de billing
