@@ -108,11 +108,8 @@ const LoginPage = () => {
           <img 
             src="/logo.png" 
             alt="Synkhro Logo" 
-            className="h-16 mx-auto mb-4 object-contain"
+            className="h-20 mx-auto mb-4 object-contain"
           />
-          <h1 className="text-3xl font-bold text-primary mb-2">
-            Synkhro
-          </h1>
           <p className="text-gray-600 text-sm">
             Área Administrativa
           </p>

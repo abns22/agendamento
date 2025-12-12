@@ -326,10 +326,10 @@ const DashboardLayout = ({ children }) => {
             {children}
           </div>
         </main>
-        
-        {/* Footer */}
-        <Footer />
       </div>
+
+      {/* Footer - Fora do container flex para ficar sempre na parte inferior */}
+      <Footer />
 
       {/* Barra de Navegação Inferior (Mobile) - Apenas em telas < 640px */}
       <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-30">
