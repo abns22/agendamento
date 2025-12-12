@@ -301,6 +301,91 @@ async def startup_event():
         # Mas logar o erro para diagnóstico
 
 
+@app.post("/create-super-admin")
+async def create_super_admin_endpoint():
+    """
+    Endpoint temporário para criar o primeiro Super Admin.
+    ATENÇÃO: Remover este endpoint após criar o super admin por segurança!
+    """
+    from app.core.database import get_db
+    from app.core.security import get_password_hash
+    from app.models.user import User, UserRole
+    from app.models.tenant import Tenant
+    from sqlalchemy import select
+    
+    # Dados do Super Admin
+    email = "alfredo_gi@hotmail.com"
+    password = "12031994@lF"
+    
+    async for db in get_db():
+        try:
+            # Verificar se o email já existe
+            existing_user = await db.execute(
+                select(User).where(User.email == email)
+            )
+            if existing_user.scalar_one_or_none():
+                return {
+                    "success": False,
+                    "message": f"Email '{email}' já está em uso!"
+                }
+            
+            # Buscar ou criar tenant para o super admin
+            tenant_result = await db.execute(
+                select(Tenant).where(Tenant.slug == "super-admin")
+            )
+            tenant = tenant_result.scalar_one_or_none()
+            
+            if not tenant:
+                tenant = Tenant(
+                    slug="super-admin",
+                    is_active=True
+                )
+                db.add(tenant)
+                await db.flush()
+            
+            # Gerar hash da senha
+            password_hash = get_password_hash(password)
+            
+            # Criar usuário Super Admin
+            super_admin = User(
+                tenant_id=tenant.id,
+                email=email,
+                password_hash=password_hash,
+                role=UserRole.SUPER_ADMIN,
+                is_active=True
+            )
+            
+            db.add(super_admin)
+            await db.commit()
+            await db.refresh(super_admin)
+            await db.refresh(tenant)
+            
+            return {
+                "success": True,
+                "message": "Super Admin criado com sucesso!",
+                "data": {
+                    "id": super_admin.id,
+                    "email": super_admin.email,
+                    "role": super_admin.role.value,
+                    "tenant_id": super_admin.tenant_id,
+                    "tenant_slug": tenant.slug
+                }
+            }
+        except Exception as e:
+            await db.rollback()
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"❌ ERRO ao criar Super Admin: {e}")
+            print(error_trace)
+            return {
+                "success": False,
+                "message": f"Erro ao criar Super Admin: {str(e)}",
+                "error": error_trace
+            }
+        finally:
+            break  # Sair do loop async for
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
