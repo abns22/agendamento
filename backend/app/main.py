@@ -271,6 +271,32 @@ async def root():
     }
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Evento de inicialização: cria as tabelas do banco de dados se não existirem."""
+    print("🔧 Inicializando banco de dados...")
+    try:
+        # Importar todos os modelos para garantir que estão registrados no Base.metadata
+        from app.models import (
+            Tenant, User, Service, ScheduleConfig, StopTime, Appointment,
+            PaymentMethodConfig, PaymentInstallmentConfig, Transaction,
+            PaymentEntry, Expense, Debtor, Client, ProductCategory, Product,
+            StockEntry
+        )
+        
+        # Criar todas as tabelas
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        
+        print("✅ Tabelas do banco de dados verificadas/criadas com sucesso!")
+    except Exception as e:
+        print(f"❌ ERRO ao inicializar banco de dados: {e}")
+        import traceback
+        print(traceback.format_exc())
+        # Não fazer raise para não impedir o servidor de iniciar
+        # Mas logar o erro para diagnóstico
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
