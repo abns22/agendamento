@@ -83,10 +83,18 @@ if isinstance(cors_origins, str):
 if not isinstance(cors_origins, list):
     cors_origins = [str(cors_origins)]
 
+# Garantir que a URL do frontend está sempre incluída
+frontend_url = "https://agendamento-frontend-mpzb.onrender.com"
+if frontend_url not in cors_origins:
+    cors_origins.append(frontend_url)
+    print(f"➕ Adicionando URL do frontend: {frontend_url}")
+
 # Log para debug (remover em produção)
 print(f"🌐 CORS Origins finais configurados: {cors_origins}")
 print(f"🌐 Tipo final: {type(cors_origins)}")
+print(f"🌐 Total de origens: {len(cors_origins)}")
 
+# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -94,7 +102,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
+    max_age=3600,  # Cache preflight por 1 hora
 )
+print("✅ CORS Middleware configurado com sucesso!")
 
 # Registrar routers
 print("🔗 Registrando routers...")
