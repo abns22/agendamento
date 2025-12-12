@@ -41,7 +41,6 @@ services:
       - type: redirect
         source: /
         destination: /login/admin
-        status: 302
       - type: rewrite
         source: /*
         destination: /index.html
