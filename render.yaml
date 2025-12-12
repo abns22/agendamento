@@ -38,6 +38,10 @@ services:
         # Domínio do Backend sem barra final - o Frontend adiciona /api/v1 no código
         value: https://agendamento-backend-v592.onrender.com
     routes:
+      - type: redirect
+        source: /
+        destination: /login/admin
+        status: 302
       - type: rewrite
         source: /*
         destination: /index.html
