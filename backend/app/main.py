@@ -106,6 +106,41 @@ app.add_middleware(
 )
 print("✅ CORS Middleware configurado com sucesso!")
 
+# Exception handler global para garantir CORS em erros
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Handler global para garantir que erros sempre retornem headers CORS."""
+    import traceback
+    print(f"❌ ERRO não tratado: {exc}")
+    print(traceback.format_exc())
+    
+    # Retornar resposta JSON com headers CORS
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Erro interno do servidor: {str(exc)}"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    """Handler para erros de validação com CORS."""
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
 # Registrar routers
 print("🔗 Registrando routers...")
 try:

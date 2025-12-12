@@ -146,27 +146,40 @@ async def login(
     Raises:
         HTTPException 401: Se as credenciais forem inválidas
     """
-    user = await AuthService.authenticate_user(
-        db=db,
-        email=credentials.email,
-        password=credentials.password
-    )
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email ou senha incorretos",
-            headers={"WWW-Authenticate": "Bearer"},
+    try:
+        user = await AuthService.authenticate_user(
+            db=db,
+            email=credentials.email,
+            password=credentials.password
         )
-    
-    # Gerar tokens
-    access_token, refresh_token = AuthService.create_tokens(user)
-    
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer"
-    )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Email ou senha incorretos",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Gerar tokens
+        access_token, refresh_token = AuthService.create_tokens(user)
+        
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer"
+        )
+    except HTTPException:
+        # Re-raise HTTPExceptions (já têm status code correto)
+        raise
+    except Exception as e:
+        # Log do erro para debug
+        import traceback
+        print(f"❌ ERRO no login: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno ao processar login: {str(e)}"
+        )
 
 
 @router.get(
