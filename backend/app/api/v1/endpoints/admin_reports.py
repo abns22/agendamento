@@ -99,9 +99,10 @@ async def get_cash_summary(
         if start_date_obj > end_date_obj:
             raise HTTPException(status_code=400, detail="Data de início deve ser anterior ou igual à data de fim")
         
-        # Criar períodos datetime UTC
-        period_start = datetime.combine(start_date_obj, datetime.min.time()).replace(tzinfo=timezone.utc)
-        period_end = datetime.combine(end_date_obj, datetime.max.time()).replace(tzinfo=timezone.utc)
+        # Criar períodos datetime UTC (timezone-naive para compatibilidade com PostgreSQL)
+        # O PostgreSQL armazena como TIMESTAMP WITHOUT TIME ZONE, então não podemos usar timezone-aware
+        period_start = datetime.combine(start_date_obj, datetime.min.time())
+        period_end = datetime.combine(end_date_obj, datetime.max.time())
         
         # Função auxiliar para calcular resumo de um período
         async def calculate_summary(start_dt, end_dt):
@@ -290,7 +291,7 @@ async def list_transactions(
         if start_date:
             try:
                 period_start = datetime.strptime(start_date, '%Y-%m-%d').replace(
-                    hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc
+                    hour=0, minute=0, second=0, microsecond=0
                 )
                 query = query.where(Transaction.date_time >= period_start)
             except ValueError:
@@ -299,7 +300,7 @@ async def list_transactions(
         if end_date:
             try:
                 period_end = datetime.strptime(end_date, '%Y-%m-%d').replace(
-                    hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc
+                    hour=23, minute=59, second=59, microsecond=999999
                 )
                 query = query.where(Transaction.date_time <= period_end)
             except ValueError:

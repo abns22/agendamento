@@ -221,8 +221,9 @@ async def create_appointment(
         # Garantir que o horário ainda está disponível antes de salvar
         # Isso evita que dois clientes agendem o mesmo slot simultaneamente
         start_datetime_utc = appointment_data.start_datetime
-        if start_datetime_utc.tzinfo is None:
-            start_datetime_utc = start_datetime_utc.replace(tzinfo=timezone.utc)
+        if start_datetime_utc.tzinfo is not None:
+            # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
+            start_datetime_utc = start_datetime_utc.replace(tzinfo=None)
         
         is_available = await AvailabilityService.is_slot_available(
             db_session=db,

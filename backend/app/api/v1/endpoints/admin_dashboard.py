@@ -58,8 +58,8 @@ async def get_dashboard_stats(
     
     # 1. Agendamentos de hoje
     today = date.today()
-    start_of_day = datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_of_day = datetime.combine(today, datetime.max.time()).replace(tzinfo=timezone.utc)
+    start_of_day = datetime.combine(today, datetime.min.time())
+    end_of_day = datetime.combine(today, datetime.max.time())
     
     appointments_today_query = select(func.count(Appointment.id)).where(
         and_(

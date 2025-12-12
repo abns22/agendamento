@@ -62,11 +62,11 @@ async def create_agenda_block(
         start_dt = block_data.start_datetime
         end_dt = block_data.end_datetime
         
-        # Garantir timezone UTC
-        if start_dt.tzinfo is None:
-            start_dt = start_dt.replace(tzinfo=timezone.utc)
-        if end_dt.tzinfo is None:
-            end_dt = end_dt.replace(tzinfo=timezone.utc)
+        # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
+        if start_dt.tzinfo is not None:
+            start_dt = start_dt.replace(tzinfo=None)
+        if end_dt.tzinfo is not None:
+            end_dt = end_dt.replace(tzinfo=None)
         
         if start_dt >= end_dt:
             raise HTTPException(
@@ -160,7 +160,7 @@ async def list_agenda_blocks(
     # Aplicar filtros de data se fornecidos
     if start_date:
         try:
-            start_dt = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
             query = query.where(Appointment.start_datetime >= start_dt)
         except ValueError:
             raise HTTPException(
@@ -170,7 +170,7 @@ async def list_agenda_blocks(
     
     if end_date:
         try:
-            end_dt = datetime.strptime(end_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
             # Adicionar 1 dia para incluir o dia inteiro
             end_dt = end_dt.replace(hour=23, minute=59, second=59)
             query = query.where(Appointment.start_datetime <= end_dt)

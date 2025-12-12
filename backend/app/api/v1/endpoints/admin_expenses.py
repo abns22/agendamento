@@ -54,7 +54,7 @@ async def list_expenses(
     if start_date:
         try:
             start_dt = datetime.strptime(start_date, '%Y-%m-%d').replace(
-                hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc
+                hour=0, minute=0, second=0, microsecond=0
             )
             query = query.where(Expense.date_time >= start_dt)
         except ValueError:
@@ -63,7 +63,7 @@ async def list_expenses(
     if end_date:
         try:
             end_dt = datetime.strptime(end_date, '%Y-%m-%d').replace(
-                hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc
+                hour=23, minute=59, second=59, microsecond=999999
             )
             query = query.where(Expense.date_time <= end_dt)
         except ValueError:
@@ -108,12 +108,13 @@ async def create_expense(
     if not tenant_id_str:
         raise HTTPException(status_code=400, detail="tenant_id inválido")
     
-    # Se date_time não for fornecido, usar data/hora atual
+    # Se date_time não for fornecido, usar data/hora atual (timezone-naive para compatibilidade com PostgreSQL)
     expense_date_time = expense_data.date_time
     if not expense_date_time:
-        expense_date_time = datetime.now(timezone.utc)
-    elif expense_date_time.tzinfo is None:
-        expense_date_time = expense_date_time.replace(tzinfo=timezone.utc)
+        expense_date_time = datetime.utcnow()
+    elif expense_date_time.tzinfo is not None:
+        # Remover timezone se presente (converter para UTC e remover tzinfo)
+        expense_date_time = expense_date_time.replace(tzinfo=None)
     
     new_expense = Expense(
         tenant_id=tenant_id_str,
@@ -232,8 +233,9 @@ async def update_expense(
         expense.category = update_data.category
     if update_data.date_time is not None:
         expense_date_time = update_data.date_time
-        if expense_date_time.tzinfo is None:
-            expense_date_time = expense_date_time.replace(tzinfo=timezone.utc)
+        if expense_date_time.tzinfo is not None:
+            # Remover timezone se presente (converter para UTC e remover tzinfo)
+            expense_date_time = expense_date_time.replace(tzinfo=None)
         expense.date_time = expense_date_time
     
     await db.commit()

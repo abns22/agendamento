@@ -74,12 +74,12 @@ async def list_appointments(
     # Aplicar filtro de data se fornecido
     if date:
         try:
-            # Converter data para datetime UTC (início e fim do dia)
+            # Converter data para datetime (início e fim do dia) - timezone-naive para compatibilidade com PostgreSQL
             start_dt = datetime.strptime(date, '%Y-%m-%d').replace(
-                hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc
+                hour=0, minute=0, second=0, microsecond=0
             )
             end_dt = datetime.strptime(date, '%Y-%m-%d').replace(
-                hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc
+                hour=23, minute=59, second=59, microsecond=999999
             )
             
             # Filtrar agendamentos que começam no dia especificado

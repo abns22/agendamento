@@ -267,7 +267,7 @@ async def settle_debtor(
         
         # 9. Atualizar Debtor
         debtor.status = DebtorStatus.PAID
-        debtor.paid_at = datetime.now(timezone.utc)
+        debtor.paid_at = datetime.utcnow()
         
         await db.commit()
         await db.refresh(debtor)
