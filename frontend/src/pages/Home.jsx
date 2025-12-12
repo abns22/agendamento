@@ -14,7 +14,7 @@ const Home = () => {
     <div className="p-6 flex flex-col items-center justify-center min-h-[60vh]">
       <div className="text-center mb-8">
         <h1 className="text-3xl font-bold text-text mb-4">
-          Sistema de Agendamento
+          Synkhro
         </h1>
         <p className="text-gray-600 mb-6">
           Agende seu horário de forma rápida e fácil

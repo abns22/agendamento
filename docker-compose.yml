@@ -4,7 +4,7 @@ services:
   # Serviço de Banco de Dados PostgreSQL
   db:
     image: postgres:16
-    container_name: sistema-agendamento-db
+    container_name: synkhro-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-agendamento_user}
@@ -30,7 +30,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: sistema-agendamento-backend
+    container_name: synkhro-backend
     restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -80,7 +80,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: sistema-agendamento-frontend
+    container_name: synkhro-frontend
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-3000}:80"

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthProvider'
 import { api } from '../../utils/api'
+import Footer from '../../components/Footer'
 
 /**
  * Layout Principal do Dashboard Administrativo (Mobile-First).
@@ -215,6 +216,13 @@ const DashboardLayout = ({ children }) => {
                 </svg>
               </button>
               
+              {/* Logo Synkhro */}
+              <img 
+                src="/logo.png" 
+                alt="Synkhro" 
+                className="h-10 w-auto object-contain hidden sm:block"
+              />
+              
               <div>
                 <h1 className="text-lg font-bold text-text">
                   {isLoadingTenant ? 'Carregando...' : tenantName}
@@ -318,6 +326,9 @@ const DashboardLayout = ({ children }) => {
             {children}
           </div>
         </main>
+        
+        {/* Footer */}
+        <Footer />
       </div>
 
       {/* Barra de Navegação Inferior (Mobile) - Apenas em telas < 640px */}

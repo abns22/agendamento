@@ -1,4 +1,4 @@
 """
-Testes de integração do sistema de agendamento.
+Testes de integração do Synkhro.
 """
 

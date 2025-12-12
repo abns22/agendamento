@@ -1,6 +1,6 @@
-# Sistema de Agendamento - Multi-Tenant
+# Synkhro - Sistema de Agendamento Multi-Tenant
 
-Sistema de agendamento web para estúdios de estética com arquitetura multi-tenant.
+Synkhro é um sistema de agendamento web para estúdios de estética com arquitetura multi-tenant.
 
 ## Stack Tecnológica
 
@@ -94,6 +94,6 @@ Veja [README_DEPLOY.md](./README_DEPLOY.md) para instruções de deploy.
 
 ## 🔗 Links
 
-- Repositório: https://github.com/abns22/sistema-agendamento-horario
+- Repositório: https://github.com/abns22/synkhro
 
 

@@ -103,10 +103,15 @@ const LoginPage = () => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-neutral-light p-4">
       <div className="w-full max-w-md">
-        {/* Logo ou Título do Sistema */}
+        {/* Logo Synkhro */}
         <div className="text-center mb-6">
+          <img 
+            src="/logo.png" 
+            alt="Synkhro Logo" 
+            className="h-16 mx-auto mb-4 object-contain"
+          />
           <h1 className="text-3xl font-bold text-primary mb-2">
-            Sistema de Agendamento
+            Synkhro
           </h1>
           <p className="text-gray-600 text-sm">
             Área Administrativa

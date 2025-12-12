@@ -1,4 +1,4 @@
-# Frontend - Sistema de Agendamento
+# Frontend - Synkhro
 
 Frontend desenvolvido com React (Vite) e Tailwind CSS, otimizado para mobile-first.
 

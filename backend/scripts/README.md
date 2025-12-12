@@ -1,4 +1,4 @@
-# Scripts SQL - Sistema de Agendamento
+# Scripts SQL - Synkhro
 
 ## 📋 Scripts Disponíveis
 

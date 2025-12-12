@@ -47,8 +47,8 @@ except Exception as e:
 
 try:
     app = FastAPI(
-    title="Sistema de Agendamento - API",
-    description="API para sistema de agendamento multi-tenant para estúdios de estética",
+    title="Synkhro - API",
+    description="API para Synkhro - Sistema de agendamento multi-tenant para estúdios de estética",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
@@ -267,7 +267,7 @@ except Exception as e:
 async def root():
     """Endpoint raiz."""
     return {
-        "message": "Sistema de Agendamento API",
+        "message": "Synkhro API",
         "version": "1.0.0",
         "docs": "/docs"
     }

@@ -1,4 +1,5 @@
 import React from 'react'
+import Footer from './Footer'
 
 /**
  * Layout base otimizado para dispositivos móveis.
@@ -20,7 +21,7 @@ const MobileLayout = ({ children }) => {
           {children || (
             <div className="p-6">
               <h1 className="text-2xl font-bold text-text mb-4">
-                Sistema de Agendamento
+                Synkhro
               </h1>
               <p className="text-gray-600">
                 Conteúdo principal da aplicação será renderizado aqui.
@@ -28,6 +29,9 @@ const MobileLayout = ({ children }) => {
             </div>
           )}
         </main>
+        
+        {/* Footer */}
+        <Footer />
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-# Backend - Sistema de Agendamento
+# Backend - Synkhro
 
 Backend desenvolvido com FastAPI, SQLAlchemy (Async) e MySQL.
 
