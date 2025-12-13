@@ -130,33 +130,21 @@ async def get_cash_summary(
             payment_methods_map = {}
             
             for transaction in transactions:
-                gross_revenue += Decimal(str(transaction.gross_value))
-                net_revenue += Decimal(str(transaction.net_value))
-                total_profit += Decimal(str(transaction.total_profit))
-                
-                # Calcular custo (sem additional_cost duplicado)
-                # total_cost já inclui additional_cost, então precisamos separar
-                # Vamos usar uma query para buscar o custo do serviço do appointment
-                if transaction.appointment_id:
-                    appointment_query = select(Appointment).where(
-                        Appointment.id == str(transaction.appointment_id)
-                    )
-                    appointment_result = await db.execute(appointment_query)
-                    appointment = appointment_result.scalar_one_or_none()
-                    if appointment and appointment.service_cost:
-                        total_service_cost += Decimal(str(appointment.service_cost))
-                
-                if transaction.additional_cost:
-                    total_additional_cost += Decimal(str(transaction.additional_cost))
-                
-                # Buscar payment entries desta transação
+                # Buscar payment entries desta transação (apenas valores pagos imediatamente)
                 payment_entries_query = select(PaymentEntry).where(
                     PaymentEntry.transaction_id == str(transaction.id)
                 )
                 payment_entries_result = await db.execute(payment_entries_query)
                 payment_entries = payment_entries_result.scalars().all()
                 
+                # IMPORTANTE: Calcular apenas valores pagos imediatamente (PaymentEntry)
+                # Não incluir valores a receber (Debtor) até que sejam pagos
+                total_paid_immediately = Decimal('0.00')
+                
                 for pe in payment_entries:
+                    # Somar apenas valores pagos imediatamente
+                    total_paid_immediately += Decimal(str(pe.value_paid))
+                    
                     # Buscar nome da forma de pagamento
                     payment_method_query = select(PaymentMethodConfig).where(
                         PaymentMethodConfig.id == str(pe.payment_method_id)
@@ -172,6 +160,46 @@ async def get_cash_summary(
                                 'is_bank_account': pe.is_bank_account
                             }
                         payment_methods_map[method_name]['total_received'] += Decimal(str(pe.value_paid))
+                
+                # Se não há payment entries, a transação não teve pagamento imediato
+                # (foi totalmente a prazo), então não deve entrar no resumo do caixa
+                if len(payment_entries) == 0:
+                    continue
+                
+                # Calcular valores proporcionais apenas do que foi pago imediatamente
+                # Proporção do valor pago em relação ao valor total da transação
+                if transaction.gross_value > Decimal('0.00'):
+                    paid_proportion = total_paid_immediately / transaction.gross_value
+                    gross_revenue += total_paid_immediately  # Valor bruto pago imediatamente
+                    net_revenue += transaction.net_value * paid_proportion  # Valor líquido proporcional
+                    total_profit += transaction.total_profit * paid_proportion  # Lucro proporcional
+                else:
+                    gross_revenue += total_paid_immediately
+                    net_revenue += transaction.net_value
+                    total_profit += transaction.total_profit
+                
+                # Calcular custo proporcional (sem additional_cost duplicado)
+                if transaction.appointment_id:
+                    appointment_query = select(Appointment).where(
+                        Appointment.id == str(transaction.appointment_id)
+                    )
+                    appointment_result = await db.execute(appointment_query)
+                    appointment = appointment_result.scalar_one_or_none()
+                    if appointment and appointment.service_cost:
+                        # Custo proporcional ao valor pago
+                        if transaction.gross_value > Decimal('0.00'):
+                            cost_proportion = total_paid_immediately / transaction.gross_value
+                            total_service_cost += Decimal(str(appointment.service_cost)) * cost_proportion
+                        else:
+                            total_service_cost += Decimal(str(appointment.service_cost))
+                
+                if transaction.additional_cost:
+                    # Custo adicional proporcional ao valor pago
+                    if transaction.gross_value > Decimal('0.00'):
+                        cost_proportion = total_paid_immediately / transaction.gross_value
+                        total_additional_cost += Decimal(str(transaction.additional_cost)) * cost_proportion
+                    else:
+                        total_additional_cost += Decimal(str(transaction.additional_cost))
             
             total_cost = total_service_cost + total_additional_cost
             
