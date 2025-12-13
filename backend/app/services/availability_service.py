@@ -138,11 +138,10 @@ class AvailabilityService:
         # Busque todos os Appointments já Confirmados ou Pendentes
         # (status != 'CANCELED') para o tenant_id na date_str
         # 
-        # IMPORTANTE: Use filtro de data considerando timezone UTC
-        # Crie datetime objects para início e fim do dia na timezone UTC
-        # Os appointments são armazenados em UTC no banco
-        start_of_day = datetime.combine(target_date, time.min).replace(tzinfo=timezone.utc)
-        end_of_day = datetime.combine(target_date, time.max).replace(tzinfo=timezone.utc)
+        # IMPORTANTE: Use filtro de data com timezone-naive (PostgreSQL usa TIMESTAMP WITHOUT TIME ZONE)
+        # Crie datetime objects para início e fim do dia sem timezone
+        start_of_day = datetime.combine(target_date, time.min)
+        end_of_day = datetime.combine(target_date, time.max)
         
         appointments_query = select(Appointment).where(
             and_(
@@ -191,11 +190,9 @@ class AvailabilityService:
         slot_interval = timedelta(minutes=AvailabilityService.DEFAULT_SLOT_INTERVAL_MINUTES)
         
         # Converter opening_time e closing_time para datetime no dia alvo
-        # IMPORTANTE: Criar datetimes com timezone UTC desde o início
-        # Os horários de funcionamento são tratados como UTC para simplificar
-        # (assumindo que o estúdio trabalha em UTC ou que a conversão será feita no frontend)
-        candidate_start_datetime = datetime.combine(target_date, opening_time).replace(tzinfo=timezone.utc)
-        closing_datetime = datetime.combine(target_date, closing_time).replace(tzinfo=timezone.utc)
+        # IMPORTANTE: Criar datetimes sem timezone (timezone-naive) para compatibilidade com PostgreSQL
+        candidate_start_datetime = datetime.combine(target_date, opening_time)
+        closing_datetime = datetime.combine(target_date, closing_time)
         
         # Loop principal de geração de slots candidatos
         while True:
@@ -234,12 +231,11 @@ class AvailabilityService:
                 existing_start = appointment.start_datetime
                 existing_end = appointment.end_datetime
                 
-                # Garantir que ambos têm timezone UTC para comparação
-                # candidate_start_datetime e candidate_end_datetime já estão em UTC
-                if existing_start.tzinfo is None:
-                    existing_start = existing_start.replace(tzinfo=timezone.utc)
-                if existing_end.tzinfo is None:
-                    existing_end = existing_end.replace(tzinfo=timezone.utc)
+                # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
+                if existing_start.tzinfo is not None:
+                    existing_start = existing_start.replace(tzinfo=None)
+                if existing_end.tzinfo is not None:
+                    existing_end = existing_end.replace(tzinfo=None)
                 
                 # Aplicar fórmula de intersecção de intervalos
                 # Se houver sobreposição, marcar como colisão
@@ -255,8 +251,8 @@ class AvailabilityService:
             if not has_collision:
                 for stop_time in stop_times:
                     # Converter horários de parada para datetime no dia alvo
-                    stop_start_datetime = datetime.combine(target_date, stop_time.start_time).replace(tzinfo=timezone.utc)
-                    stop_end_datetime = datetime.combine(target_date, stop_time.end_time).replace(tzinfo=timezone.utc)
+                    stop_start_datetime = datetime.combine(target_date, stop_time.start_time)
+                    stop_end_datetime = datetime.combine(target_date, stop_time.end_time)
                     
                     # Aplicar fórmula de intersecção de intervalos
                     # Se houver sobreposição com qualquer StopTime, marcar como colisão
@@ -354,14 +350,14 @@ class AvailabilityService:
         # Verificar se o horário está dentro do funcionamento
         opening_time = schedule_config.start_time
         closing_time = schedule_config.end_time
-        opening_datetime = datetime.combine(target_date, opening_time).replace(tzinfo=timezone.utc)
-        closing_datetime = datetime.combine(target_date, closing_time).replace(tzinfo=timezone.utc)
+        opening_datetime = datetime.combine(target_date, opening_time)
+        closing_datetime = datetime.combine(target_date, closing_time)
         
-        # Garantir que start_datetime está em UTC
-        if start_datetime.tzinfo is None:
-            start_datetime = start_datetime.replace(tzinfo=timezone.utc)
-        if end_datetime.tzinfo is None:
-            end_datetime = end_datetime.replace(tzinfo=timezone.utc)
+        # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
+        if start_datetime.tzinfo is not None:
+            start_datetime = start_datetime.replace(tzinfo=None)
+        if end_datetime.tzinfo is not None:
+            end_datetime = end_datetime.replace(tzinfo=None)
         
         # Verificar se está dentro do horário de funcionamento
         if start_datetime < opening_datetime or end_datetime > closing_datetime:
