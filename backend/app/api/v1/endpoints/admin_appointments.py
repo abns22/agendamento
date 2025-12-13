@@ -348,19 +348,30 @@ async def finalize_appointment(
         payment_entries_result = await db.execute(payment_entries_query)
         payment_entries_list = payment_entries_result.scalars().all()
         
-        # Construir resposta
-        transaction_dict = TransactionResponse.model_validate(transaction).model_dump()
-        transaction_dict['payment_entries'] = [
-            {
-                'id': str(pe.id),
-                'transaction_id': str(pe.transaction_id),
-                'payment_method_id': UUID(str(pe.payment_method_id)),
-                'value_paid': pe.value_paid,
-                'installments': pe.installments,
-                'is_bank_account': pe.is_bank_account
-            }
-            for pe in payment_entries_list
-        ]
+        # Construir resposta manualmente para evitar erro de relacionamento assíncrono
+        # Não usar model_validate diretamente no objeto Transaction pois tenta acessar payment_entries
+        transaction_dict = {
+            'id': UUID(str(transaction.id)),
+            'tenant_id': UUID(str(transaction.tenant_id)),
+            'appointment_id': UUID(str(transaction.appointment_id)),
+            'date_time': transaction.date_time,
+            'gross_value': transaction.gross_value,
+            'net_value': transaction.net_value,
+            'total_cost': transaction.total_cost,
+            'total_profit': transaction.total_profit,
+            'additional_cost': transaction.additional_cost,
+            'payment_entries': [
+                {
+                    'id': UUID(str(pe.id)),
+                    'transaction_id': UUID(str(pe.transaction_id)),
+                    'payment_method_id': UUID(str(pe.payment_method_id)),
+                    'value_paid': pe.value_paid,
+                    'installments': pe.installments,
+                    'is_bank_account': pe.is_bank_account
+                }
+                for pe in payment_entries_list
+            ]
+        }
         
         # Buscar nome do serviço para appointment
         apt_dict = AppointmentResponse.model_validate(appointment).model_dump()
