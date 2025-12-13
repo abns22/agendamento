@@ -188,10 +188,11 @@ class FinalizationService:
         total_profit = net_value - total_cost
         
         # 7. Criar Transaction
+        # Usar datetime.utcnow() (timezone-naive) para consistência com o modelo Transaction
         new_transaction = Transaction(
             tenant_id=tenant_id_str,
             appointment_id=appointment_id_str,
-            date_time=datetime.now(timezone.utc),
+            date_time=datetime.utcnow(),
             gross_value=gross_value,
             net_value=net_value,
             total_cost=total_cost,
