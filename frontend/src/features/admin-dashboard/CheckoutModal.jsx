@@ -143,33 +143,46 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
         setError('Preencha todas as formas de pagamento corretamente')
         return
       }
-    } else {
-      // Validações para pagamento futuro
+    }
+    
+    // Validar se há valor a receber (value_due)
+    const hasValueDue = valueDue && parseFloat(valueDue) > 0
+    if (hasValueDue) {
       if (!clientName.trim()) {
-        setError('Nome do cliente é obrigatório para pagamento futuro')
+        setError('Nome do cliente é obrigatório quando há valor a receber')
         return
       }
       if (!dueDate) {
-        setError('Data de vencimento é obrigatória para pagamento futuro')
+        setError('Data de vencimento é obrigatória quando há valor a receber')
         return
       }
+    }
+    
+    // Validar que a soma dos pagamentos + valor a receber = valor bruto
+    const totalPaid = paymentEntries.reduce((sum, pe) => sum + parseFloat(pe.value_paid || 0), 0)
+    const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
+    const totalCovered = totalPaid + valueDueNum
+    
+    if (Math.abs(totalCovered - grossValue) > 0.01) {
+      setError(`A soma dos pagamentos (${totalPaid.toFixed(2)}) + valor a receber (${valueDueNum.toFixed(2)}) deve ser igual ao valor bruto (${grossValue.toFixed(2)})`)
+      return
     }
     
     try {
       setIsSubmitting(true)
       
       const payload = {
-        payment_entries: isPaid ? paymentEntries.map(pe => ({
+        payment_entries: paymentEntries.map(pe => ({
           payment_method_id: pe.payment_method_id,
           value_paid: parseFloat(pe.value_paid),
           installments: isCreditCard(pe.payment_method_id) && pe.installments > 1 ? pe.installments : undefined
-        })) : [], // Se não foi pago, não envia payment_entries (será criado na baixa)
+        })),
         additional_cost: additionalCost ? parseFloat(additionalCost) : null,
-        is_paid: isPaid,
-        client_name: !isPaid ? clientName.trim() : null,
-        client_phone: !isPaid ? (clientPhone.trim() || null) : null,
-        due_date: !isPaid ? dueDate.toISOString() : null,
-        value_due: !isPaid && valueDue ? parseFloat(valueDue) : null // Valor parcial do devedor
+        is_paid: isPaid, // True se foi pago (total ou parcialmente)
+        client_name: hasValueDue ? clientName.trim() : null,
+        client_phone: hasValueDue ? (clientPhone.trim() || null) : null,
+        due_date: hasValueDue ? dueDate.toISOString() : null,
+        value_due: hasValueDue ? parseFloat(valueDue) : null // Valor a receber (pode ser parcial)
       }
       
       const response = await api.post(
