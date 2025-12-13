@@ -42,36 +42,17 @@ const TimeSlotPicker = ({ tenantSlug, serviceId, onSelectDateTime, selectedDate,
   }
 
   // Combinar data e hora selecionados
-  // IMPORTANTE: Os horários do backend vêm em UTC, mas precisamos exibir e trabalhar no timezone local
+  // IMPORTANTE: Os horários do backend são horários locais (não UTC)
+  // O tenant configura os horários de funcionamento como horários locais
+  // Portanto, não precisamos converter, apenas exibir diretamente
   const getSelectedDateTime = () => {
     if (!selectedDateState || !selectedTime) return null
     
     const [hours, minutes] = selectedTime.split(':')
-    // Criar datetime no timezone local (não UTC)
+    // Criar datetime no timezone local
     const dateTime = new Date(selectedDateState)
     dateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
     return dateTime
-  }
-  
-  // Converter horário UTC do backend para timezone local para exibição
-  const convertUTCTimeToLocal = (utcTimeStr) => {
-    // utcTimeStr vem como "HH:MM" em UTC
-    // Precisamos criar uma data UTC e converter para local
-    if (!selectedDateState) return utcTimeStr
-    
-    const [hours, minutes] = utcTimeStr.split(':')
-    const year = selectedDateState.getFullYear()
-    const month = selectedDateState.getMonth()
-    const day = selectedDateState.getDate()
-    
-    // Criar datetime em UTC
-    const utcDate = new Date(Date.UTC(year, month, day, parseInt(hours), parseInt(minutes), 0, 0))
-    
-    // Converter para timezone local e formatar
-    const localHours = utcDate.getHours().toString().padStart(2, '0')
-    const localMinutes = utcDate.getMinutes().toString().padStart(2, '0')
-    
-    return `${localHours}:${localMinutes}`
   }
 
   return (
@@ -126,18 +107,14 @@ const TimeSlotPicker = ({ tenantSlug, serviceId, onSelectDateTime, selectedDate,
 
           {!loading && slots.length > 0 && (
             <TimePillGrid>
-              {slots.map((slot) => {
-                // Converter horário UTC para local para exibição
-                const localTime = convertUTCTimeToLocal(slot)
-                return (
-                  <TimePill
-                    key={slot}
-                    time={localTime}
-                    selected={selectedTime === slot}
-                    onClick={() => handleTimeSelect(slot)}
-                  />
-                )
-              })}
+              {slots.map((slot) => (
+                <TimePill
+                  key={slot}
+                  time={slot}
+                  selected={selectedTime === slot}
+                  onClick={() => handleTimeSelect(slot)}
+                />
+              ))}
             </TimePillGrid>
           )}
         </div>
@@ -148,7 +125,7 @@ const TimeSlotPicker = ({ tenantSlug, serviceId, onSelectDateTime, selectedDate,
         <div className="mt-4 p-4 bg-primary bg-opacity-5 rounded-lg border border-primary">
           <p className="text-sm text-gray-600 mb-1">Selecionado:</p>
           <p className="font-semibold text-text">
-            {format(selectedDateState, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })} às {convertUTCTimeToLocal(selectedTime)}
+            {format(selectedDateState, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })} às {selectedTime}
           </p>
         </div>
       )}

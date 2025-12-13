@@ -47,18 +47,20 @@ const BookingForm = ({
     }
 
     try {
-      // IMPORTANTE: Os horários disponíveis do backend são gerados em UTC (ex: "10:00" UTC)
-      // Quando o usuário seleciona "10:00", ele está selecionando o horário UTC que vê na tela
-      // Portanto, devemos criar a data como UTC diretamente, SEM conversão de timezone
+      // IMPORTANTE: Os horários do backend são horários locais (não UTC)
+      // O tenant configura os horários de funcionamento como horários locais
+      // Portanto, o selectedDateTime já está no timezone local
+      // Precisamos converter para UTC antes de enviar ao backend
       
-      // Obter componentes UTC da data selecionada
-      const year = selectedDateTime.getUTCFullYear()
-      const month = selectedDateTime.getUTCMonth()
-      const day = selectedDateTime.getUTCDate()
-      const hours = selectedDateTime.getUTCHours()
-      const minutes = selectedDateTime.getUTCMinutes()
+      // Obter componentes locais da data selecionada
+      const year = selectedDateTime.getFullYear()
+      const month = selectedDateTime.getMonth()
+      const day = selectedDateTime.getDate()
+      const hours = selectedDateTime.getHours()
+      const minutes = selectedDateTime.getMinutes()
       
-      // Criar data em UTC diretamente (sem conversão)
+      // Criar data em UTC a partir do horário local
+      // O backend espera receber em UTC, então convertemos o horário local para UTC
       const utcDate = new Date(Date.UTC(year, month, day, hours, minutes, 0, 0))
       const startDatetime = utcDate.toISOString()
 
