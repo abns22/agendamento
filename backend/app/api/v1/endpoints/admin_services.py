@@ -43,8 +43,17 @@ async def list_services(
     Returns:
         List[ServiceResponse]: Lista de serviços do tenant
     """
+    # Converter tenant_id para string (PostgreSQL armazena UUIDs como String(36))
+    tenant_id_str = str(tenant.id) if tenant.id else None
+    
+    if not tenant_id_str:
+        raise HTTPException(
+            status_code=400,
+            detail="tenant_id inválido"
+        )
+    
     result = await db.execute(
-        select(Service).where(Service.tenant_id == tenant.id)
+        select(Service).where(Service.tenant_id == tenant_id_str)
     )
     services = result.scalars().all()
     
@@ -201,12 +210,22 @@ async def update_service(
         HTTPException 500: Erro interno do servidor
     """
     try:
+        # Converter service_id e tenant_id para string (PostgreSQL armazena UUIDs como String(36))
+        service_id_str = str(service_id) if service_id else None
+        tenant_id_str = str(tenant.id) if tenant.id else None
+        
+        if not service_id_str or not tenant_id_str:
+            raise HTTPException(
+                status_code=400,
+                detail="service_id e tenant_id são obrigatórios"
+            )
+        
         # Buscar serviço e validar que pertence ao tenant
         result = await db.execute(
             select(Service).where(
                 and_(
-                    Service.id == service_id,
-                    Service.tenant_id == tenant.id
+                    Service.id == service_id_str,
+                    Service.tenant_id == tenant_id_str
                 )
             )
         )
@@ -271,12 +290,22 @@ async def delete_service(
         HTTPException 500: Erro interno do servidor
     """
     try:
+        # Converter service_id e tenant_id para string (PostgreSQL armazena UUIDs como String(36))
+        service_id_str = str(service_id) if service_id else None
+        tenant_id_str = str(tenant.id) if tenant.id else None
+        
+        if not service_id_str or not tenant_id_str:
+            raise HTTPException(
+                status_code=400,
+                detail="service_id e tenant_id são obrigatórios"
+            )
+        
         # Buscar serviço e validar que pertence ao tenant
         result = await db.execute(
             select(Service).where(
                 and_(
-                    Service.id == service_id,
-                    Service.tenant_id == tenant.id
+                    Service.id == service_id_str,
+                    Service.tenant_id == tenant_id_str
                 )
             )
         )
