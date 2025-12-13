@@ -254,17 +254,12 @@ class FinalizationService:
             if due_date.tzinfo is not None:
                 due_date = due_date.replace(tzinfo=None)
             
-            # Calcular o valor líquido a receber (proporcional ao valor bruto a receber)
-            # Se value_due é o valor bruto a receber, precisamos calcular o líquido proporcional
-            # Exemplo: se total é R$ 35 (gross), R$ 25 pago agora, R$ 10 a receber
-            # O líquido a receber seria proporcional: (10/35) * net_value
-            if gross_value > Decimal('0.00'):
-                debtor_gross_value = value_due
-                # Calcular proporção do valor líquido
-                proportion = debtor_gross_value / gross_value
-                debtor_net_value = net_value * proportion
-            else:
-                debtor_net_value = value_due
+            # O value_due informado pelo usuário é o valor bruto a receber
+            # Precisamos calcular o valor líquido proporcional, mas considerando que
+            # o valor a receber não tem taxa de pagamento (será pago depois)
+            # Portanto, o valor líquido a receber é igual ao valor bruto a receber
+            # (sem descontar taxas, pois as taxas já foram descontadas dos pagamentos imediatos)
+            debtor_net_value = value_due
             
             new_debtor = Debtor(
                 transaction_id=str(new_transaction.id),
