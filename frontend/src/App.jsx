@@ -30,15 +30,10 @@ function App() {
         }}
       >
         <Routes>
+          {/* Redirecionar rota raiz para /admin/login */}
+          <Route path="/" element={<Navigate to="/admin/login" replace />} />
+          
           {/* Rotas Públicas */}
-          <Route 
-            path="/" 
-            element={
-              <MobileLayout>
-                <Home />
-              </MobileLayout>
-            } 
-          />
           {/* Rota principal de agendamento */}
           <Route 
             path="/booking/:tenantSlug" 
