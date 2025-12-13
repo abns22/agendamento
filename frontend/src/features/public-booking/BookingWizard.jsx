@@ -216,10 +216,11 @@ const BookingWizard = () => {
     <div className="min-h-screen">
       {/* Cabeçalho com informações do tenant */}
       {tenantData && (
-        <div className="bg-white border-b border-gray-200 px-4 py-4">
+        <div className="bg-white border-b border-gray-200 px-4 py-6">
           <div className="max-w-md mx-auto">
+            {/* Logo */}
             {tenantData.logo_url && (
-              <div className="flex justify-center mb-3">
+              <div className="flex justify-center mb-4">
                 <img 
                   src={
                     tenantData.logo_url.startsWith('http') 
@@ -229,7 +230,7 @@ const BookingWizard = () => {
                         : `${api.defaults.baseURL}/api/v1${tenantData.logo_url}`
                   }
                   alt={tenantData.name || tenantData.slug}
-                  className="h-16 w-auto object-contain"
+                  className="h-24 w-auto object-contain rounded-lg transition-transform duration-300 hover:scale-105"
                   onError={(e) => {
                     console.error('Erro ao carregar logo:', tenantData.logo_url)
                     e.target.style.display = 'none'
@@ -237,17 +238,70 @@ const BookingWizard = () => {
                 />
               </div>
             )}
-            <h1 className="text-xl font-bold text-text text-center mb-1">
+            
+            {/* Nome do Estúdio */}
+            <h1 className="text-2xl font-bold text-text text-center mb-2">
               {tenantData.name || tenantData.slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
             </h1>
+            
+            {/* Descrição */}
             {tenantData.description && (
-              <p className="text-sm text-gray-600 text-center mb-2">{tenantData.description}</p>
-            )}
-            {tenantData.schedule_display_text && (
-              <p className="text-xs text-gray-500 text-center">
-                🕐 {tenantData.schedule_display_text}
+              <p className="text-sm text-gray-600 text-center mb-3 leading-relaxed">
+                {tenantData.description}
               </p>
             )}
+            
+            {/* Informações Adicionais */}
+            <div className="space-y-2">
+              {/* Horário de Funcionamento */}
+              {tenantData.schedule_display_text && (
+                <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>{tenantData.schedule_display_text}</span>
+                </div>
+              )}
+              
+              {/* Endereço */}
+              {tenantData.address && (
+                <div className="flex items-start justify-center gap-2 text-xs text-gray-500">
+                  <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <span className="text-center">{tenantData.address}</span>
+                </div>
+              )}
+              
+              {/* Telefone de Contato */}
+              {tenantData.phone_contact && (
+                <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                  </svg>
+                  <a 
+                    href={`tel:${tenantData.phone_contact.replace(/\D/g, '')}`}
+                    className="text-primary hover:text-primary-dark transition-colors"
+                  >
+                    {(() => {
+                      const digits = tenantData.phone_contact.replace(/\D/g, '')
+                      if (digits.length === 11 && digits.startsWith('55')) {
+                        // Formato: 55 (11) 99999-9999
+                        return `+${digits.slice(0, 2)} (${digits.slice(2, 4)}) ${digits.slice(4, 9)}-${digits.slice(9)}`
+                      } else if (digits.length === 11) {
+                        // Formato: (11) 99999-9999
+                        return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
+                      } else if (digits.length === 10) {
+                        // Formato: (11) 9999-9999
+                        return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`
+                      }
+                      return tenantData.phone_contact
+                    })()}
+                  </a>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
