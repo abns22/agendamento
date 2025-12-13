@@ -250,9 +250,9 @@ class FinalizationService:
             if not client_name or not due_date:
                 raise ValueError("client_name e due_date são obrigatórios quando há valor a receber (value_due > 0)")
             
-            # Garantir que due_date está em UTC
-            if due_date.tzinfo is None:
-                due_date = due_date.replace(tzinfo=timezone.utc)
+            # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
+            if due_date.tzinfo is not None:
+                due_date = due_date.replace(tzinfo=None)
             
             # Calcular o valor líquido a receber (proporcional ao valor bruto a receber)
             # Se value_due é o valor bruto a receber, precisamos calcular o líquido proporcional
@@ -281,9 +281,9 @@ class FinalizationService:
             if not client_name or not due_date:
                 raise ValueError("client_name e due_date são obrigatórios quando is_paid=False")
             
-            # Garantir que due_date está em UTC
-            if due_date.tzinfo is None:
-                due_date = due_date.replace(tzinfo=timezone.utc)
+            # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
+            if due_date.tzinfo is not None:
+                due_date = due_date.replace(tzinfo=None)
             
             # Usar value_due se fornecido, senão usar net_value (valor total)
             debtor_value = value_due if value_due is not None else net_value
