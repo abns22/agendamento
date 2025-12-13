@@ -3,7 +3,7 @@ Endpoints administrativos para Relatórios e Caixa.
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, or_
+from sqlalchemy import select, and_, func, or_, extract
 from uuid import UUID
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -458,14 +458,14 @@ async def get_birthdays(
                 )
         
         # Buscar clientes com aniversário no mês especificado
-        # MySQL usa func.month() em vez de extract('month', ...)
+        # PostgreSQL usa extract() para extrair mês e dia
         query = select(Client).where(
             and_(
                 Client.tenant_id == tenant_id_str,
                 Client.birth_date.isnot(None),
-                func.month(Client.birth_date) == month
+                extract('month', Client.birth_date) == month
             )
-        ).order_by(func.day(Client.birth_date))  # Ordenar por dia do mês
+        ).order_by(extract('day', Client.birth_date))  # Ordenar por dia do mês
         
         result = await db.execute(query)
         clients = result.scalars().all()
