@@ -86,13 +86,13 @@ const BookingWizard = () => {
     
     if (date && time) {
       const [hours, minutes] = time.split(':')
-      // IMPORTANTE: Os horários do backend são gerados em UTC (ex: "10:00" UTC)
-      // Quando o usuário seleciona "10:00", ele está selecionando o horário UTC
-      // Criar datetime como UTC diretamente para manter consistência
+      // IMPORTANTE: Os horários do backend são timezone-naive (sem timezone)
+      // Quando o usuário seleciona "10:30", ele está selecionando o horário local
+      // Criar datetime no horário local (não UTC) para manter consistência
       const year = date.getFullYear()
       const month = date.getMonth()
       const day = date.getDate()
-      const dateTime = new Date(Date.UTC(year, month, day, parseInt(hours), parseInt(minutes), 0, 0))
+      const dateTime = new Date(year, month, day, parseInt(hours), parseInt(minutes), 0, 0)
       setSelectedDateTime(dateTime)
       setStep(3)
     }

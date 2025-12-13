@@ -47,20 +47,21 @@ const BookingForm = ({
     }
 
     try {
-      // IMPORTANTE: Os horários disponíveis do backend são gerados em UTC (ex: "10:00" UTC)
-      // Quando o usuário seleciona "10:00", ele está selecionando o horário UTC que vê na tela
-      // Portanto, devemos criar a data como UTC diretamente, SEM conversão de timezone
+      // IMPORTANTE: Os horários do backend são timezone-naive (sem timezone)
+      // Quando o usuário seleciona "10:30", ele está selecionando o horário local
+      // Devemos criar a data no horário local e converter para ISO string
+      // O backend espera um datetime timezone-naive, então usamos o horário local
       
-      // Obter componentes UTC da data selecionada
-      const year = selectedDateTime.getUTCFullYear()
-      const month = selectedDateTime.getUTCMonth()
-      const day = selectedDateTime.getUTCDate()
-      const hours = selectedDateTime.getUTCHours()
-      const minutes = selectedDateTime.getUTCMinutes()
+      // Obter componentes locais da data selecionada
+      const year = selectedDateTime.getFullYear()
+      const month = selectedDateTime.getMonth()
+      const day = selectedDateTime.getDate()
+      const hours = selectedDateTime.getHours()
+      const minutes = selectedDateTime.getMinutes()
       
-      // Criar data em UTC diretamente (sem conversão)
-      const utcDate = new Date(Date.UTC(year, month, day, hours, minutes, 0, 0))
-      const startDatetime = utcDate.toISOString()
+      // Criar data no horário local (timezone-naive)
+      // Formato ISO sem timezone: YYYY-MM-DDTHH:mm:ss
+      const startDatetime = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`
 
       const appointmentData = {
         service_id: serviceId,
