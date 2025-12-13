@@ -242,9 +242,13 @@ async def create_appointment(
         end_datetime_utc = start_datetime_utc + timedelta(minutes=service.duration_minutes)
         
         # Passo 5: Criar o Appointment no banco de dados
+        # IMPORTANTE: Converter UUIDs para strings (PostgreSQL armazena UUIDs como String(36))
+        tenant_id_str = str(tenant.id) if tenant.id else None
+        service_id_str = str(appointment_data.service_id) if appointment_data.service_id else None
+        
         new_appointment = Appointment(
-            tenant_id=tenant.id,
-            service_id=appointment_data.service_id,
+            tenant_id=tenant_id_str,
+            service_id=service_id_str,
             customer_name=appointment_data.customer_name,
             customer_phone=appointment_data.customer_phone,
             start_datetime=start_datetime_utc,
