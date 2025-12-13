@@ -23,6 +23,22 @@ class ClientBase(BaseModel):
         if len(phone_clean) < 10:
             raise ValueError("Telefone deve conter pelo menos 10 dígitos")
         return phone_clean
+    
+    @field_validator('email', mode='before')
+    @classmethod
+    def validate_email(cls, v) -> Optional[str]:
+        """Converte string vazia para None."""
+        if v == "" or v is None:
+            return None
+        return v
+    
+    @field_validator('birth_date', mode='before')
+    @classmethod
+    def validate_birth_date(cls, v) -> Optional[date]:
+        """Converte string vazia para None."""
+        if v == "" or v is None:
+            return None
+        return v
 
 
 class ClientCreate(ClientBase):
@@ -41,12 +57,28 @@ class ClientUpdate(BaseModel):
     @classmethod
     def validate_phone(cls, v: str) -> str:
         """Valida e normaliza o telefone."""
-        if v is None:
+        if v is None or v == "":
             return v
         phone_clean = ''.join(filter(str.isdigit, v))
         if len(phone_clean) < 10:
             raise ValueError("Telefone deve conter pelo menos 10 dígitos")
         return phone_clean
+    
+    @field_validator('email', mode='before')
+    @classmethod
+    def validate_email(cls, v) -> Optional[str]:
+        """Converte string vazia para None."""
+        if v == "" or v is None:
+            return None
+        return v
+    
+    @field_validator('birth_date', mode='before')
+    @classmethod
+    def validate_birth_date(cls, v) -> Optional[date]:
+        """Converte string vazia para None."""
+        if v == "" or v is None:
+            return None
+        return v
 
 
 class ClientResponse(ClientBase):
