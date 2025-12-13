@@ -124,7 +124,9 @@ class FinalizationService:
         for payment_entry_data in payment_entries:
             payment_method_id = payment_entry_data.get('payment_method_id')
             value_paid = Decimal(str(payment_entry_data.get('value_paid', 0)))
-            installments = payment_entry_data.get('installments', 1)
+            # Garantir que installments seja um int, não None
+            installments_raw = payment_entry_data.get('installments')
+            installments = int(installments_raw) if installments_raw is not None else 1
             
             if not payment_method_id or value_paid <= 0:
                 raise ValueError("payment_method_id e value_paid são obrigatórios e value_paid deve ser > 0")
@@ -173,7 +175,7 @@ class FinalizationService:
             payment_entries_to_create.append({
                 'payment_method_id': payment_method_id_str,
                 'value_paid': value_paid,
-                'installments': installments if installments > 1 else None,
+                'installments': installments if installments and installments > 1 else None,
                 'is_bank_account': is_bank_account
             })
         
@@ -221,14 +223,16 @@ class FinalizationService:
                 # Recalcular taxa para este pagamento específico
                 payment_method_id_str = pe_data['payment_method_id']
                 value_paid = pe_data['value_paid']
-                installments = pe_data.get('installments', 1)
+                # Garantir que installments seja um int, não None
+                installments_raw = pe_data.get('installments')
+                installments = int(installments_raw) if installments_raw is not None else 1
                 
                 fee, _ = await FinancialService.calculate_payment_fee(
                     db_session=db_session,
                     tenant_id=tenant_id,
                     payment_method_id=UUID(payment_method_id_str),
                     service_price=value_paid,
-                    installments=installments if installments else 1
+                    installments=installments
                 )
                 
                 payment_entry = PaymentEntry(
