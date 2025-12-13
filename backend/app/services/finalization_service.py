@@ -177,11 +177,18 @@ class FinalizationService:
                 'is_bank_account': is_bank_account
             })
         
-        # Validar que a soma dos pagamentos é igual ao valor bruto
+        # Validar que a soma dos pagamentos + valor a receber é igual ao valor bruto
         total_paid = sum(Decimal(str(pe['value_paid'])) for pe in payment_entries_to_create)
-        if abs(total_paid - gross_value) > Decimal('0.01'):  # Tolerância de 1 centavo
+        
+        # Se há valor a receber (value_due), considerar na validação
+        value_due_decimal = Decimal('0.00')
+        if value_due is not None:
+            value_due_decimal = Decimal(str(value_due))
+        
+        total_covered = total_paid + value_due_decimal
+        if abs(total_covered - gross_value) > Decimal('0.01'):  # Tolerância de 1 centavo
             raise ValueError(
-                f"A soma dos pagamentos ({total_paid}) deve ser igual ao valor bruto ({gross_value})"
+                f"A soma dos pagamentos ({total_paid}) + valor a receber ({value_due_decimal}) deve ser igual ao valor bruto ({gross_value})"
             )
         
         # 6. Calcular lucro
@@ -204,10 +211,12 @@ class FinalizationService:
         db_session.add(new_transaction)
         await db_session.flush()  # Para obter o ID da transação
         
-        # 8. Criar PaymentEntry para cada forma de pagamento (apenas se is_paid=True)
-        # Se is_paid=False, não cria PaymentEntry agora (será criado na baixa)
+        # 8. Criar PaymentEntry para cada forma de pagamento (se houver pagamentos agora)
+        # E criar Debtor se houver valor a receber (pagamento parcial ou total a prazo)
         new_debtor = None
-        if is_paid:
+        
+        # Criar PaymentEntry para pagamentos feitos agora
+        if payment_entries_to_create:
             for pe_data in payment_entries_to_create:
                 # Recalcular taxa para este pagamento específico
                 payment_method_id_str = pe_data['payment_method_id']
@@ -231,8 +240,40 @@ class FinalizationService:
                 )
                 
                 db_session.add(payment_entry)
-        else:
-            # Pagamento futuro: criar Debtor
+        
+        # Criar Debtor se houver valor a receber (pagamento parcial ou total a prazo)
+        if value_due is not None and value_due > Decimal('0.00'):
+            if not client_name or not due_date:
+                raise ValueError("client_name e due_date são obrigatórios quando há valor a receber (value_due > 0)")
+            
+            # Garantir que due_date está em UTC
+            if due_date.tzinfo is None:
+                due_date = due_date.replace(tzinfo=timezone.utc)
+            
+            # Calcular o valor líquido a receber (proporcional ao valor bruto a receber)
+            # Se value_due é o valor bruto a receber, precisamos calcular o líquido proporcional
+            # Exemplo: se total é R$ 35 (gross), R$ 25 pago agora, R$ 10 a receber
+            # O líquido a receber seria proporcional: (10/35) * net_value
+            if gross_value > Decimal('0.00'):
+                debtor_gross_value = value_due
+                # Calcular proporção do valor líquido
+                proportion = debtor_gross_value / gross_value
+                debtor_net_value = net_value * proportion
+            else:
+                debtor_net_value = value_due
+            
+            new_debtor = Debtor(
+                transaction_id=str(new_transaction.id),
+                client_name=client_name,
+                client_phone=client_phone,
+                due_date=due_date,
+                value_due=debtor_net_value,  # Valor líquido devido (proporcional)
+                status=DebtorStatus.PENDING
+            )
+            
+            db_session.add(new_debtor)
+        elif not is_paid and not payment_entries_to_create:
+            # Caso especial: pagamento totalmente a prazo (sem pagamentos agora)
             if not client_name or not due_date:
                 raise ValueError("client_name e due_date são obrigatórios quando is_paid=False")
             
