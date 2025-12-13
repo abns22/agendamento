@@ -131,22 +131,27 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     e.preventDefault()
     setError(null)
     
-    // Validações para pagamento à vista
-    if (isPaid) {
+    // Verificar se há valor a receber
+    const hasValueDue = valueDue && parseFloat(valueDue) > 0
+    
+    // Validações para pagamento (à vista ou parcial)
+    if (isPaid || hasValueDue) {
       const totalPaid = calculateTotalPaid()
-      if (Math.abs(totalPaid - grossValue) > 0.01) {
-        setError(`A soma dos pagamentos (${formatCurrency(totalPaid)}) deve ser igual ao valor total (${formatCurrency(grossValue)})`)
+      const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
+      const totalCovered = totalPaid + valueDueNum
+      
+      if (Math.abs(totalCovered - grossValue) > 0.01) {
+        setError(`A soma dos pagamentos (${formatCurrency(totalPaid)})${hasValueDue ? ` + valor a receber (${formatCurrency(valueDueNum)})` : ''} deve ser igual ao valor total (${formatCurrency(grossValue)})`)
         return
       }
       
-      if (paymentEntries.some(pe => !pe.payment_method_id || parseFloat(pe.value_paid) <= 0)) {
+      if (paymentEntries.length > 0 && paymentEntries.some(pe => !pe.payment_method_id || parseFloat(pe.value_paid) <= 0)) {
         setError('Preencha todas as formas de pagamento corretamente')
         return
       }
     }
     
     // Validar se há valor a receber (value_due)
-    const hasValueDue = valueDue && parseFloat(valueDue) > 0
     if (hasValueDue) {
       if (!clientName.trim()) {
         setError('Nome do cliente é obrigatório quando há valor a receber')
