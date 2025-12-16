@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 from uuid import UUID
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_active_tenant
@@ -17,7 +17,12 @@ from app.models.appointment import Appointment, AppointmentStatus
 from app.models.service import Service
 from app.models.payment_entry import PaymentEntry
 
-from app.schemas.appointment import AppointmentResponse, AppointmentCancelRequest, ManualAppointmentCreate
+from app.schemas.appointment import (
+    AppointmentResponse,
+    AppointmentCancelRequest,
+    ManualAppointmentCreate,
+    AppointmentRescheduleRequest
+)
 from app.schemas.transaction import FinalizeAppointmentRequest, FinalizeAppointmentResponse, TransactionResponse
 from app.services.finalization_service import FinalizationService
 from app.services.whatsapp_service import WhatsAppService
@@ -627,6 +632,185 @@ async def cancel_appointment(
         raise HTTPException(
             status_code=500,
             detail=f"Erro ao cancelar agendamento: {str(e)}"
+        )
+
+
+@router.put(
+    "/{appointment_id}/reschedule",
+    response_model=AppointmentResponse,
+    status_code=200,
+    summary="Reagendar agendamento",
+    description=(
+        "Reagenda um agendamento existente (manual ou via booking), "
+        "validando disponibilidade e atualizando data/hora e serviço."
+    )
+)
+async def reschedule_appointment(
+    appointment_id: UUID = Path(..., description="UUID do agendamento"),
+    reschedule_data: AppointmentRescheduleRequest = ...,
+    tenant: Tenant = Depends(get_current_active_tenant),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Reagenda um agendamento (manual ou via booking).
+
+    Fluxo:
+    1. Busca o agendamento e valida se pertence ao tenant
+    2. Determina o serviço (novo ou o atual)
+    3. Converte a nova data/hora para timezone-naive (UTC) para o banco
+    4. Valida horário de funcionamento
+    5. Verifica sobreposição com outros agendamentos (ignorando o próprio)
+    6. Atualiza o agendamento e retorna o objeto atualizado
+    """
+    try:
+        tenant_id_str = str(tenant.id) if tenant.id else None
+        appointment_id_str = str(appointment_id) if appointment_id else None
+
+        if not tenant_id_str or not appointment_id_str:
+            raise HTTPException(
+                status_code=400,
+                detail="IDs inválidos"
+            )
+
+        # Buscar agendamento atual
+        appointment_query = select(Appointment).where(
+            and_(
+                Appointment.id == appointment_id_str,
+                Appointment.tenant_id == tenant_id_str
+            )
+        )
+        appointment_result = await db.execute(appointment_query)
+        appointment = appointment_result.scalar_one_or_none()
+
+        if not appointment:
+            raise HTTPException(
+                status_code=404,
+                detail="Agendamento não encontrado"
+            )
+
+        # Não permitir reagendar cancelado ou finalizado
+        if appointment.status == AppointmentStatus.CANCELED:
+            raise HTTPException(
+                status_code=400,
+                detail="Não é possível reagendar um agendamento cancelado"
+            )
+
+        if appointment.status == AppointmentStatus.COMPLETED:
+            raise HTTPException(
+                status_code=400,
+                detail="Não é possível reagendar um agendamento já finalizado"
+            )
+
+        # Determinar serviço (novo ou atual)
+        new_service_id = reschedule_data.service_id or appointment.service_id
+        if not new_service_id:
+            raise HTTPException(
+                status_code=400,
+                detail="service_id é obrigatório para reagendamento"
+            )
+
+        service_id_str = str(new_service_id)
+
+        service_query = select(Service).where(
+            and_(
+                Service.id == service_id_str,
+                Service.tenant_id == tenant_id_str
+            )
+        )
+        service_result = await db.execute(service_query)
+        service = service_result.scalar_one_or_none()
+
+        if not service:
+            raise HTTPException(
+                status_code=400,
+                detail="Serviço não encontrado ou não pertence a este tenant"
+            )
+
+        # Processar nova data/hora (confiar que está em UTC)
+        start_datetime_utc = reschedule_data.data_agendamento
+        if start_datetime_utc.tzinfo is not None:
+            start_datetime_utc = start_datetime_utc.replace(tzinfo=None)
+
+        # Calcular novo horário de fim
+        end_datetime_utc = start_datetime_utc + timedelta(minutes=service.duration_minutes)
+
+        # Validar horário de funcionamento (similar ao AvailabilityService.is_slot_available)
+        target_date = start_datetime_utc.date()
+        day_of_week = target_date.weekday()
+
+        schedule_query = select(ScheduleConfig).where(
+            and_(
+                ScheduleConfig.tenant_id == tenant_id_str,
+                ScheduleConfig.day_of_week == day_of_week
+            )
+        )
+        schedule_result = await db.execute(schedule_query)
+        schedule_config = schedule_result.scalar_one_or_none()
+
+        if not schedule_config:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Configuração de horário não encontrada para o dia {day_of_week}"
+            )
+
+        if schedule_config.is_closed:
+            raise HTTPException(
+                status_code=400,
+                detail="Estúdio fechado neste dia"
+            )
+
+        opening_time = schedule_config.start_time
+        closing_time = schedule_config.end_time
+        opening_datetime = datetime.combine(target_date, opening_time)
+        closing_datetime = datetime.combine(target_date, closing_time)
+
+        if start_datetime_utc < opening_datetime or end_datetime_utc > closing_datetime:
+            raise HTTPException(
+                status_code=400,
+                detail="Horário fora do horário de funcionamento do estúdio"
+            )
+
+        # Verificar sobreposição com outros agendamentos, ignorando o próprio agendamento
+        conflicts_query = select(Appointment).where(
+            and_(
+                Appointment.tenant_id == tenant_id_str,
+                Appointment.id != appointment_id_str,
+                Appointment.start_datetime < end_datetime_utc,
+                Appointment.end_datetime > start_datetime_utc,
+                Appointment.status != AppointmentStatus.CANCELED
+            )
+        )
+        conflicts_result = await db.execute(conflicts_query)
+        conflicting_appointments = conflicts_result.scalars().all()
+
+        if conflicting_appointments:
+            raise HTTPException(
+                status_code=400,
+                detail="Este horário não está disponível. Por favor, escolha outro horário."
+            )
+
+        # Atualizar agendamento
+        appointment.start_datetime = start_datetime_utc
+        appointment.end_datetime = end_datetime_utc
+        appointment.service_id = service_id_str
+
+        await db.commit()
+        await db.refresh(appointment)
+
+        # Montar resposta com nome e cor do serviço
+        apt_dict = AppointmentResponse.model_validate(appointment).model_dump()
+        apt_dict["service_name"] = service.name
+        apt_dict["service_display_color_code"] = getattr(service, "display_color_code", None)
+
+        return AppointmentResponse(**apt_dict)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao reagendar agendamento: {str(e)}"
         )
 
 

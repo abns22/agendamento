@@ -73,6 +73,23 @@ class AppointmentCancelRequest(BaseModel):
     cancellation_reason: str = Field(..., min_length=3, max_length=500, description="Motivo do cancelamento (obrigatório)")
 
 
+class AppointmentRescheduleRequest(BaseModel):
+    """Schema para reagendamento de um agendamento existente."""
+    data_agendamento: datetime = Field(..., description="Nova data e hora de início do agendamento (UTC)")
+    service_id: Optional[UUID] = Field(
+        None,
+        description="Novo UUID do serviço (opcional, usa o atual se não for enviado)"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "data_agendamento": "2024-01-20T14:00:00Z",
+                "service_id": "123e4567-e89b-12d3-a456-426614174000"
+            }
+        }
+
+
 class AppointmentResponse(BaseModel):
     """Schema de resposta para Appointment."""
     id: UUID
