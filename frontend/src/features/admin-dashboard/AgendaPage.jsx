@@ -549,6 +549,12 @@ const AgendaPage = () => {
                           <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(apt.status)}`}>
                             {translateStatus(apt.status)}
                           </span>
+                          {/* Tag visual para agendamentos manuais (não são bloqueios) */}
+                          {apt.description === 'Manual' && (
+                            <span className="px-2 py-1 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200">
+                              Manual
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>

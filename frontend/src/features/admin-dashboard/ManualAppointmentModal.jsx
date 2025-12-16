@@ -136,15 +136,16 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
     setError(null)
 
     try {
-      // Combinar data e hora selecionados
+      // Combinar data e hora selecionados (timezone local)
       const [hours, minutes] = selectedTime.split(':')
       const dateTime = new Date(selectedDate)
       dateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
       
-      // Converter para UTC (o backend espera UTC)
+      // Converter para UTC (o backend espera UTC e confia que já está em UTC)
       const utcDateTime = new Date(dateTime.getTime() - (dateTime.getTimezoneOffset() * 60000))
       
       const payload = {
+        // tenant_id é inferido pelo backend a partir do token/header
         service_id: selectedService,
         data_agendamento: utcDateTime.toISOString(),
         cliente_nome: customerName.trim(),
@@ -152,6 +153,15 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
       }
 
       await api.post('/api/v1/admin/appointments/manual', payload)
+
+      // Feedback visual de sucesso
+      try {
+        if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+          window.alert('Agendamento manual criado com sucesso!')
+        }
+      } catch {
+        // Ignorar falhas em alert
+      }
       
       if (onSuccess) {
         onSuccess()
