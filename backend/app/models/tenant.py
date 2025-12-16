@@ -1,7 +1,7 @@
 """
 Modelo SQLAlchemy para a entidade Tenant (Empresa).
 """
-from sqlalchemy import Column, String, Boolean, Text
+from sqlalchemy import Column, String, Boolean, Text, Integer
 import uuid
 from app.core.database import Base
 
@@ -27,6 +27,7 @@ class Tenant(Base):
     address = Column(Text, nullable=True)  # Endereço físico do estúdio
     phone_contact = Column(String(20), nullable=True)  # Número de telefone público para contato
     schedule_display_text = Column(String(200), nullable=True)  # Texto amigável do horário (ex: "Segunda a Sexta, 09:00 - 18:00")
+    notification_days = Column(Integer, default=3, nullable=False)  # Número de dias para buscar agendamentos futuros (padrão: 3)
     
     def __repr__(self):
         return f"<Tenant(id={self.id}, slug='{self.slug}', name='{self.name}', is_active={self.is_active})>"

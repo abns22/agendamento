@@ -18,6 +18,7 @@ class TenantBase(BaseModel):
     address: Optional[str] = Field(None, description="Endereço físico do estúdio")
     phone_contact: Optional[str] = Field(None, max_length=20, description="Número de telefone público para contato")
     schedule_display_text: Optional[str] = Field(None, max_length=200, description="Texto amigável do horário (ex: 'Segunda a Sexta, 09:00 - 18:00')")
+    notification_days: Optional[int] = Field(None, ge=1, le=30, description="Número de dias para buscar agendamentos futuros (padrão: 3)")
 
 
 class TenantCreate(TenantBase):
@@ -37,6 +38,7 @@ class TenantUpdate(BaseModel):
     address: Optional[str] = None
     phone_contact: Optional[str] = Field(None, max_length=20)
     schedule_display_text: Optional[str] = Field(None, max_length=200)
+    notification_days: Optional[int] = Field(None, ge=1, le=30, description="Número de dias para buscar agendamentos futuros (padrão: 3)")
 
 
 class TenantResponse(TenantBase):

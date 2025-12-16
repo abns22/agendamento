@@ -5,10 +5,10 @@ Permite que administradores visualizem e gerenciem agendamentos de clientes.
 """
 from fastapi import APIRouter, HTTPException, Depends, Path, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from uuid import UUID
 from typing import List, Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_active_tenant
@@ -939,5 +939,82 @@ async def create_manual_appointment(
         raise HTTPException(
             status_code=500,
             detail=f"Erro ao criar agendamento manual: {str(e)}"
+        )
+
+
+@router.get(
+    "/count",
+    response_model=dict,
+    summary="Contar agendamentos futuros",
+    description="Retorna a contagem de agendamentos não cancelados do tenant para os próximos N dias (a partir de amanhã)."
+)
+async def count_future_appointments(
+    days: Optional[int] = Query(None, ge=1, le=30, description="Número de dias para buscar (opcional, usa notification_days do tenant se não fornecido)"),
+    tenant: Tenant = Depends(get_current_active_tenant),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Conta agendamentos futuros não cancelados do tenant.
+    
+    Busca agendamentos que:
+    - Não estão cancelados (status != 'CANCELED')
+    - Começam a partir de amanhã (dia seguinte ao atual)
+    - Até N dias no futuro (onde N é o parâmetro days ou notification_days do tenant)
+    
+    Args:
+        days: Número de dias para buscar (opcional, padrão: notification_days do tenant ou 3)
+        tenant: Tenant autenticado (injetado via get_current_active_tenant)
+        db: Sessão do banco de dados
+        
+    Returns:
+        dict: {"count": int, "days": int} - Contagem e número de dias usado
+        
+    Raises:
+        HTTPException 500: Erro interno do servidor
+    """
+    try:
+        tenant_id_str = str(tenant.id) if tenant.id else None
+        if not tenant_id_str:
+            raise HTTPException(status_code=400, detail="tenant_id inválido")
+        
+        # Determinar número de dias (parâmetro ou valor do tenant ou padrão 3)
+        days_to_use = days
+        if days_to_use is None:
+            # Usar notification_days do tenant se disponível, senão padrão 3
+            days_to_use = getattr(tenant, 'notification_days', None) or 3
+        
+        # Calcular período: de amanhã até N dias no futuro
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+        end_date = today + timedelta(days=days_to_use)
+        
+        # Converter para datetime (início e fim do período)
+        start_datetime = datetime.combine(tomorrow, datetime.min.time())
+        end_datetime = datetime.combine(end_date, datetime.max.time())
+        
+        # Buscar agendamentos não cancelados no período
+        count_query = select(func.count(Appointment.id)).where(
+            and_(
+                Appointment.tenant_id == tenant_id_str,
+                Appointment.start_datetime >= start_datetime,
+                Appointment.start_datetime <= end_datetime,
+                Appointment.status != AppointmentStatus.CANCELED
+            )
+        )
+        
+        count_result = await db.execute(count_query)
+        count = count_result.scalar() or 0
+        
+        return {
+            "count": count,
+            "days": days_to_use
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao contar agendamentos futuros: {str(e)}"
         )
 
