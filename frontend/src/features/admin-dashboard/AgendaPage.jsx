@@ -390,14 +390,16 @@ const AgendaPage = () => {
           
           {/* Botão de Ações com Menu */}
           <div className="relative">
-            <Button
-              onClick={() => setShowActionMenu(!showActionMenu)}
-              variant="primary"
-              className="flex items-center gap-2"
-            >
-              <span className="text-xl">+</span>
-              <span className="hidden sm:inline">Nova Ação</span>
-            </Button>
+            <div className="flex justify-end">
+              <Button
+                onClick={() => setShowActionMenu(!showActionMenu)}
+                variant="primary"
+                className="flex items-center gap-2"
+              >
+                <span className="text-xl">+</span>
+                <span className="hidden sm:inline">Nova Ação</span>
+              </Button>
+            </div>
             
             {/* Menu Dropdown */}
             {showActionMenu && (
@@ -409,13 +411,13 @@ const AgendaPage = () => {
                 />
                 {/*
                   Menu responsivo:
-                  - Em mobile: centralizado abaixo do botão, largura máxima da tela com margens
+                  - Em mobile: alinhado à direita da tela com margem, abaixo do topo
                   - Em telas maiores: alinhado à direita do botão (dropdown clássico)
                 */}
                 <div
-                  className="absolute mt-2 z-20 w-56 max-w-[calc(100vw-2rem)] 
-                             left-1/2 -translate-x-1/2
-                             sm:right-0 sm:left-auto sm:translate-x-0
+                  className="fixed sm:absolute z-20 w-56 max-w-[calc(100vw-2rem)] 
+                             right-4 top-20
+                             sm:right-0 sm:top-auto sm:mt-2
                              bg-white rounded-lg shadow-lg border border-gray-200"
                 >
                   <button
