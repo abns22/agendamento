@@ -17,11 +17,13 @@ from app.models.appointment import Appointment, AppointmentStatus
 from app.models.service import Service
 from app.models.payment_entry import PaymentEntry
 
-from app.schemas.appointment import AppointmentResponse, AppointmentCancelRequest
+from app.schemas.appointment import AppointmentResponse, AppointmentCancelRequest, ManualAppointmentCreate
 from app.schemas.transaction import FinalizeAppointmentRequest, FinalizeAppointmentResponse, TransactionResponse
 from app.services.finalization_service import FinalizationService
 from app.services.whatsapp_service import WhatsAppService
+from app.services.availability_service import AvailabilityService
 from pydantic import BaseModel
+from datetime import timedelta
 
 router = APIRouter(prefix="/admin/appointments", tags=["Admin - Appointments"])
 
@@ -547,5 +549,133 @@ async def cancel_appointment(
         raise HTTPException(
             status_code=500,
             detail=f"Erro ao cancelar agendamento: {str(e)}"
+        )
+
+
+@router.post(
+    "/manual",
+    response_model=AppointmentResponse,
+    status_code=201,
+    summary="Criar agendamento manual",
+    description="Cria um novo agendamento manualmente pelo administrador. Valida disponibilidade e persiste com origem 'Manual'."
+)
+async def create_manual_appointment(
+    appointment_data: ManualAppointmentCreate,
+    tenant: Tenant = Depends(get_current_active_tenant),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Cria um novo agendamento manual.
+    
+    Este endpoint permite que administradores criem agendamentos manualmente,
+    validando a disponibilidade do horário e persistindo com a tag de origem "Manual".
+    
+    Fluxo:
+    1. Recebe dados do agendamento (service_id, data_agendamento, cliente_nome, cliente_contato)
+    2. Valida que o data_agendamento está em UTC (confia no valor recebido)
+    3. Busca o serviço para obter duração
+    4. Verifica disponibilidade do slot usando AvailabilityService
+    5. Se disponível, cria o agendamento com description="Manual" (origem)
+    6. Retorna o agendamento criado
+    
+    Args:
+        appointment_data: Dados do agendamento manual (ManualAppointmentCreate)
+        tenant: Tenant autenticado (injetado via dependency)
+        db: Sessão do banco de dados (injetada)
+        
+    Returns:
+        AppointmentResponse: Agendamento criado com status SCHEDULED
+        
+    Raises:
+        HTTPException 400: Se os dados forem inválidos, serviço não existir ou horário indisponível
+        HTTPException 500: Erro interno do servidor
+    """
+    try:
+        # Passo 1: Validar tenant_id
+        tenant_id_str = str(tenant.id) if tenant.id else None
+        if not tenant_id_str:
+            raise HTTPException(
+                status_code=400,
+                detail="tenant_id inválido"
+            )
+        
+        # Passo 2: Buscar serviço para validar e calcular duração
+        service_id_str = str(appointment_data.service_id) if appointment_data.service_id else None
+        if not service_id_str:
+            raise HTTPException(
+                status_code=400,
+                detail="service_id é obrigatório"
+            )
+        
+        service_query = select(Service).where(
+            and_(
+                Service.id == service_id_str,
+                Service.tenant_id == tenant_id_str
+            )
+        )
+        service_result = await db.execute(service_query)
+        service = service_result.scalar_one_or_none()
+        
+        if not service:
+            raise HTTPException(
+                status_code=400,
+                detail="Serviço não encontrado ou não pertence a este tenant"
+            )
+        
+        # Passo 3: Processar data_agendamento (confiar que está em UTC)
+        start_datetime_utc = appointment_data.data_agendamento
+        
+        # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
+        if start_datetime_utc.tzinfo is not None:
+            start_datetime_utc = start_datetime_utc.replace(tzinfo=None)
+        
+        # Passo 4: Verificar disponibilidade do slot
+        is_available = await AvailabilityService.is_slot_available(
+            db_session=db,
+            tenant_id=tenant.id,
+            service_id=appointment_data.service_id,
+            start_datetime=start_datetime_utc
+        )
+        
+        if not is_available:
+            raise HTTPException(
+                status_code=400,
+                detail="Este horário não está disponível. Por favor, escolha outro horário."
+            )
+        
+        # Passo 5: Calcular end_datetime
+        end_datetime_utc = start_datetime_utc + timedelta(minutes=service.duration_minutes)
+        
+        # Passo 6: Criar o Appointment no banco de dados
+        # IMPORTANTE: Converter UUIDs para strings (PostgreSQL armazena UUIDs como String(36))
+        new_appointment = Appointment(
+            tenant_id=tenant_id_str,
+            service_id=service_id_str,
+            customer_name=appointment_data.cliente_nome,
+            customer_phone=appointment_data.cliente_contato,
+            start_datetime=start_datetime_utc,
+            end_datetime=end_datetime_utc,
+            status=AppointmentStatus.SCHEDULED,
+            description="Manual"  # Marca origem como "Manual"
+        )
+        
+        db.add(new_appointment)
+        await db.commit()
+        await db.refresh(new_appointment)
+        
+        # Passo 7: Retornar o agendamento criado com nome do serviço
+        apt_dict = AppointmentResponse.model_validate(new_appointment).model_dump()
+        apt_dict['service_name'] = service.name
+        apt_dict['service_display_color_code'] = service.display_color_code
+        
+        return AppointmentResponse(**apt_dict)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao criar agendamento manual: {str(e)}"
         )
 

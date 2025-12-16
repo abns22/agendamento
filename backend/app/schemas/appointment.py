@@ -35,6 +35,39 @@ class AppointmentCreate(BaseModel):
         }
 
 
+class ManualAppointmentCreate(BaseModel):
+    """Schema para criação de agendamento manual pelo administrador."""
+    service_id: UUID = Field(..., description="UUID do serviço a ser agendado")
+    data_agendamento: datetime = Field(..., description="Data e hora de início do agendamento (UTC)")
+    cliente_nome: str = Field(..., min_length=2, max_length=200, description="Nome do cliente")
+    cliente_contato: str = Field(..., min_length=10, max_length=20, description="Contato (telefone ou e-mail) do cliente")
+    
+    @field_validator('cliente_contato')
+    @classmethod
+    def validate_contact(cls, v: str) -> str:
+        """Valida e normaliza o contato (telefone ou e-mail)."""
+        # Se for telefone, remove caracteres não numéricos
+        if any(c.isdigit() for c in v):
+            phone_clean = ''.join(filter(str.isdigit, v))
+            if len(phone_clean) < 10:
+                raise ValueError("Telefone deve conter pelo menos 10 dígitos")
+            return phone_clean
+        # Se for e-mail, valida formato básico
+        if '@' not in v:
+            raise ValueError("E-mail inválido ou telefone deve conter pelo menos 10 dígitos")
+        return v.strip()
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "service_id": "123e4567-e89b-12d3-a456-426614174000",
+                "data_agendamento": "2024-01-15T10:00:00Z",
+                "cliente_nome": "João Silva",
+                "cliente_contato": "11987654321"
+            }
+        }
+
+
 class AppointmentCancelRequest(BaseModel):
     """Schema para requisição de cancelamento de agendamento."""
     cancellation_reason: str = Field(..., min_length=3, max_length=500, description="Motivo do cancelamento (obrigatório)")
