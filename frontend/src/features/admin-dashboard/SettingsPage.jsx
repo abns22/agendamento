@@ -32,6 +32,7 @@ const SettingsPage = () => {
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [notificationPhone, setNotificationPhone] = useState('')
+  const [notificationDays, setNotificationDays] = useState(3)
   
   // Carregar configurações ao montar
   useEffect(() => {
@@ -53,6 +54,21 @@ const SettingsPage = () => {
         setStartTime(data.default_start_time || '09:00')
         setEndTime(data.default_end_time || '18:00')
         setNotificationPhone(data.notification_phone_number || '')
+
+        // Buscar configurações específicas do tenant (como notification_days)
+        try {
+          const tenantResponse = await api.get('/api/v1/admin/tenant')
+          const tenantData = tenantResponse.data
+          setNotificationDays(
+            typeof tenantData.notification_days === 'number'
+              ? tenantData.notification_days
+              : 3
+          )
+        } catch (tenantErr) {
+          console.error('Erro ao carregar dados do tenant:', tenantErr)
+          // Se falhar, manter valor padrão
+          setNotificationDays(3)
+        }
       } catch (err) {
         console.error('Erro ao carregar configurações:', err)
         setError(err.response?.data?.detail || 'Erro ao carregar configurações')
@@ -79,8 +95,7 @@ const SettingsPage = () => {
       setError(null)
       setSuccess(false)
       
-      // Construir objeto de atualização com todos os campos
-      // O backend só atualiza os campos que são enviados (opcionais)
+      // Construir objeto de atualização com todos os campos de configuração geral
       const updateData = {
         name: name || null,
         logo_url: logoUrl || null,
@@ -97,11 +112,11 @@ const SettingsPage = () => {
         updateData.default_end_time = endTime
       }
       
-      console.log('📤 Enviando dados para atualização:', updateData)
+      console.log('📤 Enviando dados para atualização (config):', updateData)
       
       const response = await api.put('/api/v1/admin/config', updateData)
       
-      console.log('✅ Resposta do servidor:', response.data)
+      console.log('✅ Resposta do servidor (config):', response.data)
       
       // Atualizar estado local com os dados retornados
       setConfig(response.data)
@@ -115,6 +130,14 @@ const SettingsPage = () => {
       setStartTime(response.data.default_start_time || '09:00')
       setEndTime(response.data.default_end_time || '18:00')
       setNotificationPhone(response.data.notification_phone_number || '')
+
+      // Atualizar configuração específica do tenant (notification_days)
+      const notificationDaysInt = parseInt(notificationDays, 10)
+      if (!Number.isNaN(notificationDaysInt)) {
+        await api.put('/api/v1/admin/tenant', {
+          notification_days: notificationDaysInt,
+        })
+      }
       
       setSuccess(true)
       
@@ -330,6 +353,43 @@ const SettingsPage = () => {
           <p className="text-xs text-gray-500 -mt-4">
             Texto amigável do horário de funcionamento (será exibido na página de agendamento).
           </p>
+
+          {/* Configuração de dias de notificação */}
+          <div className="mt-4">
+            <label className="block text-sm font-semibold text-text mb-2">
+              Avisar sobre agendamentos nos próximos (dias)
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={notificationDays}
+                onChange={(e) => {
+                  const value = e.target.value
+                  // Permitir campo vazio temporariamente no input
+                  if (value === '') {
+                    setNotificationDays('')
+                    return
+                  }
+                  const intVal = parseInt(value, 10)
+                  if (!Number.isNaN(intVal)) {
+                    // Limitar entre 1 e 30
+                    const clamped = Math.min(Math.max(intVal, 1), 30)
+                    setNotificationDays(clamped)
+                  }
+                }}
+                disabled={isSaving}
+                className="w-24 px-3 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-center"
+              />
+              <span className="text-sm text-gray-700">
+                O sistema exibirá um aviso com a quantidade de agendamentos nos próximos dias configurados.
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Valor entre 1 e 30 dias. Se não configurado, o padrão é 3 dias.
+            </p>
+          </div>
           
           <div className="border-t border-gray-200 pt-6 mt-6">
             <h3 className="text-lg font-semibold text-text mb-4">Configurações Internas</h3>

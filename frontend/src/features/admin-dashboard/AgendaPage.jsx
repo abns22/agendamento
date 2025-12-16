@@ -37,6 +37,8 @@ const AgendaPage = () => {
   const [selectedService, setSelectedService] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [cancellationReason, setCancellationReason] = useState('')
+  const [appointmentsSummary, setAppointmentsSummary] = useState(null)
+  const [showAppointmentsSummary, setShowAppointmentsSummary] = useState(true)
   
   // Filtros
   const [statusFilter, setStatusFilter] = useState('')
@@ -98,6 +100,22 @@ const AgendaPage = () => {
       setIsLoading(false)
     }
   }
+
+  // Buscar contagem de agendamentos futuros (notificação discreta)
+  useEffect(() => {
+    const fetchFutureAppointmentsCount = async () => {
+      try {
+        const response = await api.get('/api/v1/admin/appointments/count')
+        const data = response.data
+        setAppointmentsSummary(data)
+        setShowAppointmentsSummary((data?.count || 0) > 0)
+      } catch (err) {
+        console.error('Erro ao buscar contagem de agendamentos futuros:', err)
+      }
+    }
+
+    fetchFutureAppointmentsCount()
+  }, [])
 
   // Abrir modal de detalhes do agendamento
   const handleAppointmentClick = (appointment) => {
@@ -338,6 +356,28 @@ const AgendaPage = () => {
 
   return (
     <div className="space-y-6">
+      {/* Notificação discreta de agendamentos futuros */}
+      {appointmentsSummary && showAppointmentsSummary && appointmentsSummary.count > 0 && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg flex items-start justify-between gap-3">
+          <div className="flex-1 text-sm">
+            <p className="font-semibold">Aviso de agendamentos</p>
+            <p className="mt-1">
+              Você tem {appointmentsSummary.count}{' '}
+              agendamento(s) nos próximos {appointmentsSummary.days}{' '}
+              dia(s).
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAppointmentsSummary(false)}
+            className="text-blue-500 hover:text-blue-700 text-sm font-semibold ml-2"
+            aria-label="Fechar aviso de agendamentos futuros"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Cabeçalho */}
       <div className="space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-4">
