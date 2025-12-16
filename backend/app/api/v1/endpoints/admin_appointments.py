@@ -949,7 +949,10 @@ async def create_manual_appointment(
     description="Retorna a contagem de agendamentos não cancelados do tenant para os próximos N dias (a partir de amanhã)."
 )
 async def count_future_appointments(
-    days: Optional[int] = Query(None, ge=1, le=30, description="Número de dias para buscar (opcional, usa notification_days do tenant se não fornecido)"),
+    days: Optional[int] = Query(
+        default=None,
+        description="Número de dias para buscar (opcional, usa notification_days do tenant se não fornecido)"
+    ),
     tenant: Tenant = Depends(get_current_active_tenant),
     db: AsyncSession = Depends(get_db)
 ):
@@ -982,6 +985,19 @@ async def count_future_appointments(
         if days_to_use is None:
             # Usar notification_days do tenant se disponível, senão padrão 3
             days_to_use = getattr(tenant, 'notification_days', None) or 3
+
+        # Garantir que days_to_use esteja dentro de um intervalo seguro (1 a 30)
+        try:
+            days_to_use_int = int(days_to_use)
+        except (TypeError, ValueError):
+            days_to_use_int = 3
+
+        if days_to_use_int < 1:
+            days_to_use_int = 1
+        if days_to_use_int > 30:
+            days_to_use_int = 30
+
+        days_to_use = days_to_use_int
         
         # Calcular período: de amanhã até N dias no futuro
         today = date.today()
