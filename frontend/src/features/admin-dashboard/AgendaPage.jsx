@@ -362,11 +362,22 @@ const AgendaPage = () => {
             {/* Menu Dropdown */}
             {showActionMenu && (
               <>
+                {/* Overlay para fechar ao clicar fora */}
                 <div
                   className="fixed inset-0 z-10"
                   onClick={() => setShowActionMenu(false)}
                 />
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-20">
+                {/*
+                  Menu responsivo:
+                  - Em mobile: centralizado abaixo do botão, largura máxima da tela com margens
+                  - Em telas maiores: alinhado à direita do botão (dropdown clássico)
+                */}
+                <div
+                  className="absolute mt-2 z-20 w-56 max-w-[calc(100vw-2rem)] 
+                             left-1/2 -translate-x-1/2
+                             sm:right-0 sm:left-auto sm:translate-x-0
+                             bg-white rounded-lg shadow-lg border border-gray-200"
+                >
                   <button
                     onClick={() => {
                       setIsManualAppointmentModalOpen(true)
