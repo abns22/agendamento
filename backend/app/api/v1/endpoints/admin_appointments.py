@@ -28,6 +28,84 @@ from datetime import timedelta
 router = APIRouter(prefix="/admin/appointments", tags=["Admin - Appointments"])
 
 
+@router.get(
+    "/availability",
+    response_model=dict,
+    summary="Buscar disponibilidade geral",
+    description="Retorna todos os horários disponíveis para uma data específica, usando a menor duração de serviço disponível."
+)
+async def get_availability(
+    date: str = Query(..., description="Data no formato YYYY-MM-DD"),
+    tenant: Tenant = Depends(get_current_active_tenant),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Busca horários disponíveis para uma data específica.
+    
+    Para agendamento manual, retorna todos os slots disponíveis usando
+    a menor duração de serviço disponível no tenant.
+    
+    Args:
+        date: Data no formato YYYY-MM-DD
+        tenant: Tenant autenticado
+        db: Sessão do banco de dados
+        
+    Returns:
+        dict: Objeto com date e lista de available_slots
+    """
+    try:
+        tenant_id_str = str(tenant.id) if tenant.id else None
+        if not tenant_id_str:
+            raise HTTPException(status_code=400, detail="tenant_id inválido")
+        
+        # Validar formato de data
+        try:
+            datetime.strptime(date, '%Y-%m-%d')
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Data deve estar no formato YYYY-MM-DD")
+        
+        # Buscar o primeiro serviço do tenant para usar sua duração
+        # (ou o serviço com menor duração)
+        services_query = select(Service).where(
+            Service.tenant_id == tenant_id_str
+        ).order_by(Service.duration_minutes.asc())
+        
+        services_result = await db.execute(services_query)
+        services = services_result.scalars().all()
+        
+        if not services:
+            # Se não houver serviços, retornar lista vazia
+            return {
+                'date': date,
+                'available_slots': []
+            }
+        
+        # Usar o primeiro serviço (menor duração) para calcular disponibilidade
+        first_service = services[0]
+        
+        # Usar AvailabilityService para calcular slots
+        from uuid import UUID
+        available_slots = await AvailabilityService.get_available_slots(
+            db_session=db,
+            tenant_id=UUID(tenant_id_str),
+            service_id=UUID(str(first_service.id)),
+            date_str=date
+        )
+        
+        return {
+            'date': date,
+            'available_slots': available_slots
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao buscar disponibilidade: {str(e)}"
+        )
+
+
 class AppointmentUpdate(BaseModel):
     """Schema para atualização de agendamento."""
     status: Optional[str] = None

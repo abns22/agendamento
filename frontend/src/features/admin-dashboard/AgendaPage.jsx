@@ -6,6 +6,7 @@ import { ptBR } from 'date-fns/locale'
 import { api, formatCurrency, formatDuration } from '../../utils/api'
 import { Card, Button, Modal } from '../../components/ui'
 import CheckoutModal from './CheckoutModal'
+import ManualAppointmentModal from './ManualAppointmentModal'
 
 /**
  * Página de Gerenciamento de Agenda.
@@ -29,6 +30,8 @@ const AgendaPage = () => {
   const [isBlockModalOpen, setIsBlockModalOpen] = useState(false)
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false)
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false)
+  const [isManualAppointmentModalOpen, setIsManualAppointmentModalOpen] = useState(false)
+  const [showActionMenu, setShowActionMenu] = useState(false)
   const [selectedService, setSelectedService] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [cancellationReason, setCancellationReason] = useState('')
@@ -324,6 +327,48 @@ const AgendaPage = () => {
             <p className="text-gray-600 mt-1">
               Gerencie os agendamentos do seu estúdio
             </p>
+          </div>
+          
+          {/* Botão de Ações com Menu */}
+          <div className="relative">
+            <Button
+              onClick={() => setShowActionMenu(!showActionMenu)}
+              variant="primary"
+              className="flex items-center gap-2"
+            >
+              <span className="text-xl">+</span>
+              <span className="hidden sm:inline">Nova Ação</span>
+            </Button>
+            
+            {/* Menu Dropdown */}
+            {showActionMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowActionMenu(false)}
+                />
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-20">
+                  <button
+                    onClick={() => {
+                      setIsManualAppointmentModalOpen(true)
+                      setShowActionMenu(false)
+                    }}
+                    className="w-full text-left px-4 py-3 hover:bg-gray-50 rounded-t-lg transition-colors"
+                  >
+                    <span className="font-semibold text-text">📅 Agendamento Manual</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleOpenBlockModal()
+                      setShowActionMenu(false)
+                    }}
+                    className="w-full text-left px-4 py-3 hover:bg-gray-50 rounded-b-lg transition-colors"
+                  >
+                    <span className="font-semibold text-text">⏸️ Registrar Pausa</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
         
@@ -819,6 +864,14 @@ const AgendaPage = () => {
           )}
         </div>
       </Modal>
+
+      {/* Modal de Agendamento Manual */}
+      <ManualAppointmentModal
+        isOpen={isManualAppointmentModalOpen}
+        onClose={() => setIsManualAppointmentModalOpen(false)}
+        services={services}
+        onSuccess={fetchAppointments}
+      />
     </div>
   )
 }
