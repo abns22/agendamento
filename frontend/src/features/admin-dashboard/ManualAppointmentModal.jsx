@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { api } from '../../utils/api'
+import { api, formatDuration } from '../../utils/api'
 import { Modal, Button, Card } from '../../components/ui'
 
 /**
@@ -30,6 +30,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
       setCustomerName('')
       setCustomerContact('')
       setError(null)
+      setAvailableSlots([])
     }
   }, [isOpen, services])
 
@@ -68,26 +69,66 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
     setSelectedTime(time)
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    
-    if (!selectedService) {
+  const validateForm = () => {
+    // Validar serviço
+    if (!selectedService || selectedService === '') {
       setError('Selecione um serviço')
-      return
+      return false
     }
     
-    if (!customerName.trim()) {
-      setError('Nome do cliente é obrigatório')
-      return
-    }
-    
-    if (!customerContact.trim()) {
-      setError('Contato do cliente é obrigatório')
-      return
+    // Validar data e horário
+    if (!selectedDate) {
+      setError('Selecione uma data')
+      return false
     }
     
     if (!selectedTime) {
-      setError('Selecione um horário')
+      setError('Selecione um horário disponível')
+      return false
+    }
+    
+    // Validar nome do cliente
+    if (!customerName.trim() || customerName.trim().length < 2) {
+      setError('Nome do cliente é obrigatório e deve ter pelo menos 2 caracteres')
+      return false
+    }
+    
+    // Validar contato do cliente
+    if (!customerContact.trim()) {
+      setError('Contato do cliente é obrigatório')
+      return false
+    }
+    
+    // Validar formato de contato (telefone ou e-mail)
+    const contactTrimmed = customerContact.trim()
+    const isPhone = /^[\d\s\(\)\-\+]+$/.test(contactTrimmed)
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactTrimmed)
+    
+    if (!isPhone && !isEmail) {
+      setError('Contato deve ser um telefone válido ou um e-mail válido')
+      return false
+    }
+    
+    // Validar telefone (mínimo 10 dígitos)
+    if (isPhone) {
+      const digitsOnly = contactTrimmed.replace(/\D/g, '')
+      if (digitsOnly.length < 10) {
+        setError('Telefone deve conter pelo menos 10 dígitos')
+        return false
+      }
+    }
+    
+    return true
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    
+    // Limpar erro anterior
+    setError(null)
+    
+    // Validar formulário
+    if (!validateForm()) {
       return
     }
 
@@ -222,19 +263,27 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
           <label className="block text-sm font-semibold text-gray-700 mb-2">
             Serviço *
           </label>
-          <select
-            value={selectedService}
-            onChange={(e) => setSelectedService(e.target.value)}
-            className="w-full px-4 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            required
-          >
-            <option value="">Selecione um serviço</option>
-            {services.map(service => (
-              <option key={service.id} value={service.id}>
-                {service.name}
-              </option>
-            ))}
-          </select>
+          {services.length === 0 ? (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <p className="text-yellow-800 text-sm">
+                Nenhum serviço cadastrado. Por favor, cadastre um serviço antes de criar um agendamento.
+              </p>
+            </div>
+          ) : (
+            <select
+              value={selectedService}
+              onChange={(e) => setSelectedService(e.target.value)}
+              className="w-full px-4 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base"
+              required
+            >
+              <option value="">Selecione um serviço</option>
+              {services.map(service => (
+                <option key={service.id} value={service.id}>
+                  {service.name} {service.duration_minutes ? `(${formatDuration(service.duration_minutes)})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Calendário Interativo */}
@@ -373,11 +422,18 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
             <input
               type="text"
               value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              onChange={(e) => {
+                setCustomerName(e.target.value)
+                setError(null) // Limpar erro ao digitar
+              }}
+              className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base"
               placeholder="Ex: João Silva"
+              minLength={2}
               required
             />
+            <p className="text-xs text-gray-500 mt-1">
+              Mínimo de 2 caracteres
+            </p>
           </div>
 
           <div>
@@ -387,11 +443,17 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
             <input
               type="text"
               value={customerContact}
-              onChange={(e) => setCustomerContact(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              onChange={(e) => {
+                setCustomerContact(e.target.value)
+                setError(null) // Limpar erro ao digitar
+              }}
+              className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base"
               placeholder="Ex: 11987654321 ou email@exemplo.com"
               required
             />
+            <p className="text-xs text-gray-500 mt-1">
+              Telefone (mínimo 10 dígitos) ou e-mail válido
+            </p>
           </div>
         </div>
 
@@ -413,21 +475,30 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
         )}
 
         {/* Botões */}
-        <div className="flex gap-3 justify-end">
+        <div className="flex flex-col sm:flex-row gap-3 justify-end pt-4 border-t border-gray-200">
           <Button
             type="button"
             variant="secondary"
             onClick={onClose}
             disabled={isSubmitting}
+            className="w-full sm:w-auto"
           >
             Cancelar
           </Button>
           <Button
             type="submit"
             variant="primary"
-            disabled={isSubmitting || !selectedTime || !selectedService}
+            disabled={
+              isSubmitting || 
+              !selectedTime || 
+              !selectedService || 
+              !customerName.trim() || 
+              !customerContact.trim() ||
+              services.length === 0
+            }
+            className="w-full sm:w-auto"
           >
-            {isSubmitting ? 'Criando...' : 'Criar Agendamento'}
+            {isSubmitting ? 'Agendando...' : 'Agendar Manualmente'}
           </Button>
         </div>
       </form>
