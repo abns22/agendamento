@@ -7,6 +7,7 @@ import { api, formatCurrency, formatDuration } from '../../utils/api'
 import { Card, Button, Modal } from '../../components/ui'
 import CheckoutModal from './CheckoutModal'
 import ManualAppointmentModal from './ManualAppointmentModal'
+import RescheduleAppointmentModal from './RescheduleAppointmentModal'
 
 /**
  * Página de Gerenciamento de Agenda.
@@ -31,6 +32,7 @@ const AgendaPage = () => {
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false)
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false)
   const [isManualAppointmentModalOpen, setIsManualAppointmentModalOpen] = useState(false)
+  const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false)
   const [showActionMenu, setShowActionMenu] = useState(false)
   const [selectedService, setSelectedService] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -120,6 +122,16 @@ const AgendaPage = () => {
   const handleCloseCancelModal = () => {
     setIsCancelModalOpen(false)
     setCancellationReason('')
+  }
+
+  // Abrir modal de reagendamento
+  const handleOpenRescheduleModal = () => {
+    if (!selectedAppointment) return
+    setIsRescheduleModalOpen(true)
+  }
+
+  const handleCloseRescheduleModal = () => {
+    setIsRescheduleModalOpen(false)
   }
 
   // Cancelar agendamento com motivo
@@ -275,6 +287,13 @@ const AgendaPage = () => {
     await fetchAppointments()
     // Fechar modais
     handleCloseCheckout()
+    handleCloseModal()
+  }
+
+  // Sucesso no reagendamento
+  const handleRescheduleSuccess = async () => {
+    await fetchAppointments()
+    setIsRescheduleModalOpen(false)
     handleCloseModal()
   }
 
@@ -668,6 +687,18 @@ const AgendaPage = () => {
                     ❌ Cancelar Agendamento
                   </Button>
                 )}
+
+                {/* Reagendar - disponível para agendamentos não cancelados nem concluídos */}
+                {selectedAppointment.status !== 'CANCELED' && selectedAppointment.status !== 'COMPLETED' && (
+                  <Button
+                    variant="secondary"
+                    onClick={handleOpenRescheduleModal}
+                    disabled={isSubmitting || !selectedAppointment.service_id}
+                    className="w-full"
+                  >
+                    🔁 Reagendar
+                  </Button>
+                )}
                 
                 {(selectedAppointment.status === 'SCHEDULED' || selectedAppointment.status === 'CONFIRMED') && (
                   <Button
@@ -877,6 +908,15 @@ const AgendaPage = () => {
         onClose={() => setIsManualAppointmentModalOpen(false)}
         services={services}
         onSuccess={fetchAppointments}
+      />
+
+      {/* Modal de Reagendamento */}
+      <RescheduleAppointmentModal
+        isOpen={isRescheduleModalOpen}
+        onClose={handleCloseRescheduleModal}
+        services={services}
+        appointment={selectedAppointment}
+        onSuccess={handleRescheduleSuccess}
       />
     </div>
   )
