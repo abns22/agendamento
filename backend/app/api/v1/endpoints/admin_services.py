@@ -147,6 +147,14 @@ async def create_service(
         HTTPException 500: Erro interno do servidor
     """
     try:
+        # Remover timezone das datas de promoção para compatibilidade com PostgreSQL
+        promotion_start_date = service_data.promotion_start_date
+        promotion_end_date = service_data.promotion_end_date
+        if promotion_start_date is not None and hasattr(promotion_start_date, 'tzinfo') and promotion_start_date.tzinfo is not None:
+            promotion_start_date = promotion_start_date.replace(tzinfo=None)
+        if promotion_end_date is not None and hasattr(promotion_end_date, 'tzinfo') and promotion_end_date.tzinfo is not None:
+            promotion_end_date = promotion_end_date.replace(tzinfo=None)
+        
         # Criar novo serviço anexando o tenant_id automaticamente
         new_service = Service(
             tenant_id=tenant.id,  # tenant_id injetado automaticamente
@@ -156,8 +164,8 @@ async def create_service(
             fixed_cost_value=service_data.fixed_cost_value,
             # Campos de promoção
             is_promotional=service_data.is_promotional or False,
-            promotion_start_date=service_data.promotion_start_date,
-            promotion_end_date=service_data.promotion_end_date,
+            promotion_start_date=promotion_start_date,
+            promotion_end_date=promotion_end_date,
             promotional_value=service_data.promotional_value,
             promotion_display_name=service_data.promotion_display_name,
             promotion_description=service_data.promotion_description,
@@ -240,6 +248,10 @@ async def update_service(
         # Atualizar apenas os campos fornecidos
         update_data = service_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
+            # Remover timezone das datas de promoção para compatibilidade com PostgreSQL
+            if field in ('promotion_start_date', 'promotion_end_date') and value is not None:
+                if hasattr(value, 'tzinfo') and value.tzinfo is not None:
+                    value = value.replace(tzinfo=None)
             setattr(service, field, value)
         
         await db.commit()
