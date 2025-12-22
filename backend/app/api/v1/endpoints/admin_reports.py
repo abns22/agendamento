@@ -166,11 +166,15 @@ async def get_cash_summary(
                 if len(payment_entries) == 0:
                     continue
                 
+                # Calcular valor final após desconto (usado para proporções)
+                discount_value = Decimal(str(transaction.discount)) if transaction.discount else Decimal('0.00')
+                final_value_after_discount = transaction.gross_value - discount_value
+                
                 # Calcular valores proporcionais apenas do que foi pago imediatamente
-                # Proporção do valor pago em relação ao valor total da transação
-                if transaction.gross_value > Decimal('0.00'):
-                    paid_proportion = total_paid_immediately / transaction.gross_value
-                    gross_revenue += total_paid_immediately  # Valor bruto pago imediatamente
+                # Proporção do valor pago em relação ao valor final após desconto
+                if final_value_after_discount > Decimal('0.00'):
+                    paid_proportion = total_paid_immediately / final_value_after_discount
+                    gross_revenue += total_paid_immediately  # Valor pago imediatamente (já com desconto aplicado)
                     net_revenue += transaction.net_value * paid_proportion  # Valor líquido proporcional
                     total_profit += transaction.total_profit * paid_proportion  # Lucro proporcional
                 else:
@@ -186,17 +190,17 @@ async def get_cash_summary(
                     appointment_result = await db.execute(appointment_query)
                     appointment = appointment_result.scalar_one_or_none()
                     if appointment and appointment.service_cost:
-                        # Custo proporcional ao valor pago
-                        if transaction.gross_value > Decimal('0.00'):
-                            cost_proportion = total_paid_immediately / transaction.gross_value
+                        # Custo proporcional ao valor pago (usando valor após desconto)
+                        if final_value_after_discount > Decimal('0.00'):
+                            cost_proportion = total_paid_immediately / final_value_after_discount
                             total_service_cost += Decimal(str(appointment.service_cost)) * cost_proportion
                         else:
                             total_service_cost += Decimal(str(appointment.service_cost))
                 
                 if transaction.additional_cost:
-                    # Custo adicional proporcional ao valor pago
-                    if transaction.gross_value > Decimal('0.00'):
-                        cost_proportion = total_paid_immediately / transaction.gross_value
+                    # Custo adicional proporcional ao valor pago (usando valor após desconto)
+                    if final_value_after_discount > Decimal('0.00'):
+                        cost_proportion = total_paid_immediately / final_value_after_discount
                         total_additional_cost += Decimal(str(transaction.additional_cost)) * cost_proportion
                     else:
                         total_additional_cost += Decimal(str(transaction.additional_cost))
