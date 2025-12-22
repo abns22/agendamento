@@ -22,6 +22,7 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
   
   // Estado do formulário
   const [grossValue, setGrossValue] = useState(0) // Valor bruto (com promoção se ativa)
+  const [discount, setDiscount] = useState('') // Valor do desconto
   const [paymentEntries, setPaymentEntries] = useState([]) // Lista de formas de pagamento
   const [additionalCost, setAdditionalCost] = useState('')
   const [isPaid, setIsPaid] = useState(true) // True se foi pago, False se é a prazo
@@ -116,6 +117,20 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     }, 0)
   }
   
+  // Calcular valor final após desconto
+  const calculateFinalValue = () => {
+    const discountValue = parseFloat(discount || 0)
+    const finalValue = Math.max(0, grossValue - discountValue)
+    return finalValue
+  }
+  
+  // Calcular porcentagem do desconto
+  const calculateDiscountPercentage = () => {
+    if (!discount || parseFloat(discount) <= 0 || grossValue <= 0) return 0
+    const discountValue = parseFloat(discount)
+    return ((discountValue / grossValue) * 100).toFixed(1)
+  }
+  
   const getPaymentMethodName = (methodId) => {
     const method = paymentMethods.find(m => m.id === methodId)
     return method ? method.method_name : ''
@@ -131,6 +146,20 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     e.preventDefault()
     setError(null)
     
+    // Validar desconto
+    const discountValue = parseFloat(discount || 0)
+    if (discountValue < 0) {
+      setError('Desconto não pode ser negativo')
+      return
+    }
+    if (discountValue > grossValue) {
+      setError(`Desconto (${formatCurrency(discountValue)}) não pode ser maior que o valor bruto (${formatCurrency(grossValue)})`)
+      return
+    }
+    
+    // Calcular valor final após desconto
+    const finalValueAfterDiscount = calculateFinalValue()
+    
     // Verificar se há valor a receber
     const hasValueDue = valueDue && parseFloat(valueDue) > 0
     
@@ -140,8 +169,9 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
       const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
       const totalCovered = totalPaid + valueDueNum
       
-      if (Math.abs(totalCovered - grossValue) > 0.01) {
-        setError(`A soma dos pagamentos (${formatCurrency(totalPaid)})${hasValueDue ? ` + valor a receber (${formatCurrency(valueDueNum)})` : ''} deve ser igual ao valor total (${formatCurrency(grossValue)})`)
+      // Validar contra o valor final após desconto (não o valor bruto)
+      if (Math.abs(totalCovered - finalValueAfterDiscount) > 0.01) {
+        setError(`A soma dos pagamentos (${formatCurrency(totalPaid)})${hasValueDue ? ` + valor a receber (${formatCurrency(valueDueNum)})` : ''} deve ser igual ao valor final após desconto (${formatCurrency(finalValueAfterDiscount)})`)
         return
       }
       
@@ -163,13 +193,13 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
       }
     }
     
-    // Validar que a soma dos pagamentos + valor a receber = valor bruto
+    // Validar que a soma dos pagamentos + valor a receber = valor final após desconto
     const totalPaid = paymentEntries.reduce((sum, pe) => sum + parseFloat(pe.value_paid || 0), 0)
     const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
     const totalCovered = totalPaid + valueDueNum
     
-    if (Math.abs(totalCovered - grossValue) > 0.01) {
-      setError(`A soma dos pagamentos (${totalPaid.toFixed(2)}) + valor a receber (${valueDueNum.toFixed(2)}) deve ser igual ao valor bruto (${grossValue.toFixed(2)})`)
+    if (Math.abs(totalCovered - finalValueAfterDiscount) > 0.01) {
+      setError(`A soma dos pagamentos (${totalPaid.toFixed(2)}) + valor a receber (${valueDueNum.toFixed(2)}) deve ser igual ao valor final após desconto (${finalValueAfterDiscount.toFixed(2)})`)
       return
     }
     
@@ -183,6 +213,7 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
           installments: isCreditCard(pe.payment_method_id) && pe.installments > 1 ? pe.installments : undefined
         })),
         additional_cost: additionalCost ? parseFloat(additionalCost) : null,
+        discount: discountValue > 0 ? discountValue : 0, // Enviar desconto (0 se não houver)
         is_paid: isPaid, // True se foi pago (total ou parcialmente)
         client_name: hasValueDue ? clientName.trim() : null,
         client_phone: hasValueDue ? (clientPhone.trim() || null) : null,
@@ -209,9 +240,12 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
   }
   
   if (!isOpen || !appointment || !service) return null
-  
+
   const totalPaid = calculateTotalPaid()
-  const remaining = grossValue - totalPaid
+  const finalValueAfterDiscount = calculateFinalValue()
+  const remaining = finalValueAfterDiscount - totalPaid
+  const discountValue = parseFloat(discount || 0)
+  const discountPercentage = calculateDiscountPercentage()
   
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Finalizar Venda">
@@ -223,7 +257,7 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
         )}
         
         {/* Valor Total */}
-        <div className="bg-gray-50 p-4 rounded-lg">
+        <div className="bg-gray-50 p-4 rounded-lg space-y-3">
           <div className="flex justify-between items-center">
             <span className="text-sm font-semibold text-gray-700">Valor Total:</span>
             <span className="text-2xl font-bold text-primary">
@@ -231,11 +265,53 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
             </span>
           </div>
           {service.is_promotional && service.promotional_value && (
-            <div className="mt-2 text-xs text-gray-600">
+            <div className="text-xs text-gray-600">
               <span className="line-through">{formatCurrency(parseFloat(service.price))}</span>
               <span className="ml-2 text-red-600 font-semibold">
                 Promoção: {formatCurrency(parseFloat(service.promotional_value))}
               </span>
+            </div>
+          )}
+          
+          {/* Campo de Desconto */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Desconto (R$)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              max={grossValue}
+              value={discount}
+              onChange={(e) => {
+                const value = e.target.value
+                // Permitir campo vazio ou valores válidos
+                if (value === '' || (parseFloat(value) >= 0 && parseFloat(value) <= grossValue)) {
+                  setDiscount(value)
+                }
+              }}
+              placeholder="0.00"
+              inputMode="decimal"
+              className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
+              disabled={isSubmitting}
+            />
+            {discountValue > 0 && (
+              <p className="text-xs text-gray-600 mt-1">
+                {formatCurrency(discountValue)} de desconto - {discountPercentage}%
+              </p>
+            )}
+          </div>
+          
+          {/* Valor Final após Desconto */}
+          {discountValue > 0 && (
+            <div className="pt-3 border-t border-gray-300">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-gray-700">Valor Final:</span>
+                <span className="text-xl font-bold text-green-600">
+                  {formatCurrency(finalValueAfterDiscount)}
+                </span>
+              </div>
             </div>
           )}
         </div>
@@ -337,6 +413,12 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
               <span className="font-semibold">Total Pago:</span>
               <span className="font-bold">{formatCurrency(totalPaid)}</span>
             </div>
+            {discountValue > 0 && (
+              <div className="flex justify-between text-xs text-gray-600 mt-1">
+                <span>Valor Final (após desconto):</span>
+                <span>{formatCurrency(finalValueAfterDiscount)}</span>
+              </div>
+            )}
             {remaining > 0.01 && (
               <div className="flex justify-between text-sm text-red-600 mt-1">
                 <span>Restante:</span>
@@ -446,12 +528,13 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
                   max={grossValue}
                   value={valueDue}
                   onChange={(e) => setValueDue(e.target.value)}
-                  placeholder={grossValue.toFixed(2)}
+                  placeholder={finalValueAfterDiscount.toFixed(2)}
+                  max={finalValueAfterDiscount}
                   className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary"
                   disabled={isSubmitting}
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Deixe vazio ou preencha com o valor total ({formatCurrency(grossValue)}) para registrar o valor completo. 
+                  Deixe vazio ou preencha com o valor final após desconto ({formatCurrency(finalValueAfterDiscount)}) para registrar o valor completo. 
                   Ou informe um valor parcial se o cliente ficará devendo apenas parte do serviço.
                 </p>
               </div>
@@ -479,7 +562,7 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
           <Button
             type="submit"
             variant="primary"
-            disabled={isSubmitting || (isPaid && Math.abs(calculateTotalPaid() - grossValue) > 0.01)}
+            disabled={isSubmitting || (isPaid && Math.abs(calculateTotalPaid() - calculateFinalValue()) > 0.01)}
             className="flex-1"
           >
             {isSubmitting ? 'Finalizando...' : (isPaid ? 'Finalizar Venda' : 'Criar Conta a Receber')}
