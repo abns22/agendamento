@@ -35,26 +35,30 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
   useEffect(() => {
     if (isOpen && appointment) {
       fetchPaymentMethods()
+    }
+  }, [isOpen, appointment])
+  
+  // Recalcular valor quando o serviço mudar
+  useEffect(() => {
+    if (isOpen && service) {
       calculateGrossValue()
       // Inicializar valueDue com o valor total quando abrir (usando o mesmo cálculo de calculateGrossValue)
-      if (service) {
-        const now = new Date()
-        let value = parseFloat(service.price)
-        if (service.is_promotional && service.promotion_start_date && service.promotion_end_date && service.promotional_value) {
-          const startDate = new Date(service.promotion_start_date)
-          const endDate = new Date(service.promotion_end_date)
-          // Comparar timestamps para evitar problemas de timezone
-          const nowTime = now.getTime()
-          const startTime = startDate.getTime()
-          const endTime = endDate.getTime()
-          if (nowTime >= startTime && nowTime <= endTime) {
-            value = parseFloat(service.promotional_value)
-          }
+      const now = new Date()
+      let value = parseFloat(service.price)
+      if (service.is_promotional && service.promotion_start_date && service.promotion_end_date && service.promotional_value) {
+        const startDate = new Date(service.promotion_start_date)
+        const endDate = new Date(service.promotion_end_date)
+        // Comparar timestamps para evitar problemas de timezone
+        const nowTime = now.getTime()
+        const startTime = startDate.getTime()
+        const endTime = endDate.getTime()
+        if (nowTime >= startTime && nowTime <= endTime) {
+          value = parseFloat(service.promotional_value)
         }
-        setValueDue(value.toFixed(2))
       }
+      setValueDue(value.toFixed(2))
     }
-  }, [isOpen, appointment, service])
+  }, [isOpen, service])
   
   const fetchPaymentMethods = async () => {
     try {
@@ -70,7 +74,18 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
   }
   
   const calculateGrossValue = () => {
-    if (!service) return
+    if (!service) {
+      console.log('calculateGrossValue: serviço não disponível')
+      return
+    }
+    
+    console.log('calculateGrossValue: serviço recebido', {
+      price: service.price,
+      is_promotional: service.is_promotional,
+      promotion_start_date: service.promotion_start_date,
+      promotion_end_date: service.promotion_end_date,
+      promotional_value: service.promotional_value
+    })
     
     // Verificar se há promoção ativa
     // O backend usa PromotionService.get_effective_price() que verifica se a promoção está ativa
@@ -90,17 +105,33 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
         const startTime = startDate.getTime()
         const endTime = endDate.getTime()
         
+        console.log('Verificando promoção:', {
+          now: now.toISOString(),
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
+          nowTime,
+          startTime,
+          endTime,
+          isActive: nowTime >= startTime && nowTime <= endTime
+        })
+        
         // Verificar se a promoção está ativa (agora está entre início e fim, incluindo os limites)
         if (nowTime >= startTime && nowTime <= endTime) {
           value = parseFloat(service.promotional_value)
+          console.log('Promoção ativa! Usando valor promocional:', value)
+        } else {
+          console.log('Promoção não está ativa. Usando valor normal:', value)
         }
       } catch (error) {
         console.error('Erro ao verificar promoção:', error)
         // Em caso de erro, usar o valor normal
         value = parseFloat(service.price)
       }
+    } else {
+      console.log('Serviço não tem promoção ou dados incompletos')
     }
     
+    console.log('Valor final calculado:', value)
     setGrossValue(value)
     
     // Inicializar com uma entrada de pagamento vazia
