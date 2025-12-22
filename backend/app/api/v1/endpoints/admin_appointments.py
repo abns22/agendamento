@@ -16,6 +16,7 @@ from app.models.tenant import Tenant
 from app.models.appointment import Appointment, AppointmentStatus
 from app.models.service import Service
 from app.models.payment_entry import PaymentEntry
+from app.models.schedule_config import ScheduleConfig
 
 from app.schemas.appointment import (
     AppointmentResponse,
