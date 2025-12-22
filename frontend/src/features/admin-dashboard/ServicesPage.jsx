@@ -183,8 +183,14 @@ const ServicesPage = () => {
         }
         
         // Combinar data e hora para criar datetime
-        const startDateTime = new Date(`${formData.promotion_start_date}T${formData.promotion_start_time}:00`)
-        const endDateTime = new Date(`${formData.promotion_end_date}T${formData.promotion_end_time}:00`)
+        // IMPORTANTE: O horário informado pelo usuário deve ser salvo exatamente como informado (sem conversão de timezone)
+        // Para isso, criamos a data como se fosse UTC desde o início, adicionando 'Z' ao final
+        // Isso evita que o JavaScript converta o horário local para UTC (que adicionaria +3 horas no Brasil)
+        const startDateTimeStr = `${formData.promotion_start_date}T${formData.promotion_start_time}:00Z`
+        const endDateTimeStr = `${formData.promotion_end_date}T${formData.promotion_end_time}:00Z`
+        
+        const startDateTime = new Date(startDateTimeStr)
+        const endDateTime = new Date(endDateTimeStr)
         
         // Validar que data de fim é posterior à data de início
         if (endDateTime <= startDateTime) {
@@ -192,6 +198,7 @@ const ServicesPage = () => {
           return
         }
         
+        // Enviar como ISO string (já em UTC, sem conversão adicional)
         payload.promotion_start_date = startDateTime.toISOString()
         payload.promotion_end_date = endDateTime.toISOString()
         payload.promotional_value = parseFloat(formData.promotional_value)
