@@ -513,6 +513,7 @@ async def finalize_appointment(
             appointment_id=appointment_id,
             payment_entries=payment_entries,
             additional_cost=finalize_data.additional_cost,
+            discount=finalize_data.discount,
             is_paid=finalize_data.is_paid,
             client_name=finalize_data.client_name,
             client_phone=finalize_data.client_phone,

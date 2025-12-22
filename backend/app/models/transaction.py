@@ -12,7 +12,10 @@ class Transaction(Base):
     """
     Modelo Transaction representa uma transação de venda no caixa.
     Cada transação está vinculada a um agendamento e registra o valor bruto,
-    líquido, custos e lucro.
+    desconto, valor líquido, custos e lucro.
+    
+    Cálculo: valor_final = gross_value - discount
+    O valor_final é usado para calcular taxas e valor líquido.
     """
     __tablename__ = "transactions"
     
@@ -20,8 +23,9 @@ class Transaction(Base):
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     appointment_id = Column(String(36), ForeignKey("appointments.id"), nullable=False, index=True)
     date_time = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)  # Data/hora da transação (UTC)
-    gross_value = Column(DECIMAL(10, 2), nullable=False)  # Valor bruto (antes das taxas)
-    net_value = Column(DECIMAL(10, 2), nullable=False)  # Valor líquido (após taxas de pagamento)
+    gross_value = Column(DECIMAL(10, 2), nullable=False)  # Valor bruto original do serviço (antes do desconto e taxas)
+    discount = Column(DECIMAL(10, 2), nullable=False, default=0.00)  # Valor do desconto aplicado (padrão: 0.00)
+    net_value = Column(DECIMAL(10, 2), nullable=False)  # Valor líquido (após desconto e taxas de pagamento)
     total_cost = Column(DECIMAL(10, 2), nullable=False)  # Soma dos fixed_cost_value dos serviços
     total_profit = Column(DECIMAL(10, 2), nullable=False)  # Lucro (net_value - total_cost)
     additional_cost = Column(DECIMAL(10, 2), nullable=True)  # Custo adicional (opcional, para controle interno)

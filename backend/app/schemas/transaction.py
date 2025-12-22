@@ -41,8 +41,9 @@ class PaymentEntryResponse(PaymentEntryBase):
 class TransactionBase(BaseModel):
     """Schema base para Transaction."""
     appointment_id: UUID = Field(..., description="ID do agendamento")
-    gross_value: Decimal = Field(..., ge=0, decimal_places=2, description="Valor bruto (antes das taxas)")
-    net_value: Decimal = Field(..., ge=0, decimal_places=2, description="Valor líquido (após taxas)")
+    gross_value: Decimal = Field(..., ge=0, decimal_places=2, description="Valor bruto original do serviço (antes do desconto e taxas)")
+    discount: Decimal = Field(0, ge=0, decimal_places=2, description="Valor do desconto aplicado")
+    net_value: Decimal = Field(..., ge=0, decimal_places=2, description="Valor líquido (após desconto e taxas)")
     total_cost: Decimal = Field(..., ge=0, decimal_places=2, description="Soma dos custos fixos dos serviços")
     total_profit: Decimal = Field(..., decimal_places=2, description="Lucro (net_value - total_cost)")
     additional_cost: Optional[Decimal] = Field(None, ge=0, decimal_places=2, description="Custo adicional opcional")
@@ -74,6 +75,7 @@ class FinalizeAppointmentRequest(BaseModel):
     """Schema para requisição de finalização de agendamento."""
     payment_entries: List[PaymentEntryCreate] = Field(default=[], description="Lista de formas de pagamento (vazia se is_paid=False)")
     additional_cost: Optional[Decimal] = Field(None, ge=0, decimal_places=2, description="Custo adicional opcional")
+    discount: Optional[Decimal] = Field(0, ge=0, decimal_places=2, description="Valor do desconto aplicado (padrão: 0.00)")
     is_paid: bool = Field(True, description="True se foi pago, False se é a prazo (pagamento futuro)")
     # Campos para pagamento futuro (quando is_paid=False)
     client_name: Optional[str] = Field(None, max_length=200, description="Nome do cliente (obrigatório se is_paid=False)")

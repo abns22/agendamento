@@ -33,6 +33,7 @@ class FinalizationService:
         appointment_id: UUID,
         payment_entries: List[dict],
         additional_cost: Optional[Decimal] = None,
+        discount: Optional[Decimal] = None,
         is_paid: bool = True,
         client_name: Optional[str] = None,
         client_phone: Optional[str] = None,
@@ -46,11 +47,12 @@ class FinalizationService:
         1. Buscar agendamento e validar
         2. Buscar serviço e calcular custos
         3. Aplicar promoção (se ativa) para obter valor bruto
-        4. Calcular taxas de pagamento para cada forma de pagamento
-        5. Calcular valor líquido total
-        6. Criar Transaction
-        7. Criar PaymentEntry para cada forma de pagamento
-        8. Atualizar Appointment para COMPLETED
+        4. Aplicar desconto (se fornecido) e validar
+        5. Calcular taxas de pagamento para cada forma de pagamento
+        6. Calcular valor líquido total
+        7. Criar Transaction
+        8. Criar PaymentEntry para cada forma de pagamento
+        9. Atualizar Appointment para COMPLETED
         
         Args:
             db_session: Sessão do banco de dados
@@ -58,12 +60,13 @@ class FinalizationService:
             appointment_id: UUID do agendamento
             payment_entries: Lista de dicts com payment_method_id, value_paid, installments
             additional_cost: Custo adicional opcional
+            discount: Valor do desconto aplicado (opcional, padrão: 0.00)
             
         Returns:
-            Tuple[Transaction, Appointment]: Transação criada e agendamento atualizado
+            Tuple[Transaction, Appointment, Optional[Debtor]]: Transação criada, agendamento atualizado e devedor (se houver)
             
         Raises:
-            ValueError: Se o agendamento não for encontrado, já estiver finalizado, ou dados inválidos
+            ValueError: Se o agendamento não for encontrado, já estiver finalizado, dados inválidos ou desconto maior que valor bruto
         """
         # Converter IDs para strings
         tenant_id_str = str(tenant_id) if tenant_id else None
@@ -109,7 +112,19 @@ class FinalizationService:
         # 3. Calcular valor bruto (aplicando promoção se ativa)
         gross_value = Decimal(str(PromotionService.get_effective_price(service)))
         
-        # 4. Calcular custo total
+        # 4. Aplicar desconto e validar
+        discount_value = Decimal('0.00')
+        if discount is not None:
+            discount_value = Decimal(str(discount))
+            if discount_value < 0:
+                raise ValueError("Desconto não pode ser negativo")
+            if discount_value > gross_value:
+                raise ValueError(f"Desconto ({discount_value}) não pode ser maior que o valor bruto do serviço ({gross_value})")
+        
+        # Calcular valor final após desconto (usado para cálculos de taxas e validações)
+        final_value_after_discount = gross_value - discount_value
+        
+        # 5. Calcular custo total
         total_cost = Decimal('0.00')
         if service.fixed_cost_value:
             total_cost = Decimal(str(service.fixed_cost_value))
@@ -117,7 +132,7 @@ class FinalizationService:
         if additional_cost:
             total_cost += additional_cost
         
-        # 5. Calcular taxas de pagamento e valor líquido total
+        # 6. Calcular taxas de pagamento e valor líquido total
         net_value = Decimal('0.00')
         payment_entries_to_create = []
         
@@ -147,11 +162,12 @@ class FinalizationService:
             
             # Calcular taxa de pagamento para este valor parcial
             # A taxa é calculada proporcionalmente ao valor pago
+            # O valor base para cálculo de taxa é o valor pago (já considerando desconto proporcional)
             fee, value_with_fee = await FinancialService.calculate_payment_fee(
                 db_session=db_session,
                 tenant_id=tenant_id,
                 payment_method_id=payment_method_id,
-                service_price=value_paid,  # Usar o valor parcial como base
+                service_price=value_paid,  # Usar o valor parcial como base (já com desconto proporcional)
                 installments=installments
             )
             
@@ -179,7 +195,7 @@ class FinalizationService:
                 'is_bank_account': is_bank_account
             })
         
-        # Validar que a soma dos pagamentos + valor a receber é igual ao valor bruto
+        # Validar que a soma dos pagamentos + valor a receber é igual ao valor final após desconto
         total_paid = sum(Decimal(str(pe['value_paid'])) for pe in payment_entries_to_create)
         
         # Se há valor a receber (value_due), considerar na validação
@@ -188,22 +204,24 @@ class FinalizationService:
             value_due_decimal = Decimal(str(value_due))
         
         total_covered = total_paid + value_due_decimal
-        if abs(total_covered - gross_value) > Decimal('0.01'):  # Tolerância de 1 centavo
+        # Validar contra o valor final após desconto (não o valor bruto)
+        if abs(total_covered - final_value_after_discount) > Decimal('0.01'):  # Tolerância de 1 centavo
             raise ValueError(
-                f"A soma dos pagamentos ({total_paid}) + valor a receber ({value_due_decimal}) deve ser igual ao valor bruto ({gross_value})"
+                f"A soma dos pagamentos ({total_paid}) + valor a receber ({value_due_decimal}) deve ser igual ao valor final após desconto ({final_value_after_discount})"
             )
         
-        # 6. Calcular lucro
+        # 7. Calcular lucro
         total_profit = net_value - total_cost
         
-        # 7. Criar Transaction
+        # 8. Criar Transaction
         # Usar datetime.utcnow() (timezone-naive) para consistência com o modelo Transaction
         new_transaction = Transaction(
             tenant_id=tenant_id_str,
             appointment_id=appointment_id_str,
             date_time=datetime.utcnow(),
-            gross_value=gross_value,
-            net_value=net_value,
+            gross_value=gross_value,  # Valor bruto original (para histórico)
+            discount=discount_value,  # Valor do desconto aplicado
+            net_value=net_value,  # Valor líquido (após desconto e taxas)
             total_cost=total_cost,
             total_profit=total_profit,
             additional_cost=additional_cost,
