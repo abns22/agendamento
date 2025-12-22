@@ -36,14 +36,18 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     if (isOpen && appointment) {
       fetchPaymentMethods()
       calculateGrossValue()
-      // Inicializar valueDue com o valor total quando abrir
+      // Inicializar valueDue com o valor total quando abrir (usando o mesmo cálculo de calculateGrossValue)
       if (service) {
         const now = new Date()
         let value = parseFloat(service.price)
-        if (service.is_promotional && service.promotion_start_date && service.promotion_end_date) {
+        if (service.is_promotional && service.promotion_start_date && service.promotion_end_date && service.promotional_value) {
           const startDate = new Date(service.promotion_start_date)
           const endDate = new Date(service.promotion_end_date)
-          if (now >= startDate && now <= endDate && service.promotional_value) {
+          // Comparar timestamps para evitar problemas de timezone
+          const nowTime = now.getTime()
+          const startTime = startDate.getTime()
+          const endTime = endDate.getTime()
+          if (nowTime >= startTime && nowTime <= endTime) {
             value = parseFloat(service.promotional_value)
           }
         }
@@ -69,15 +73,35 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     if (!service) return
     
     // Verificar se há promoção ativa
-    const now = new Date()
+    // O backend usa PromotionService.get_effective_price() que verifica se a promoção está ativa
+    // Vamos replicar a mesma lógica aqui
     let value = parseFloat(service.price)
     
-    if (service.is_promotional && service.promotion_start_date && service.promotion_end_date) {
-      const startDate = new Date(service.promotion_start_date)
-      const endDate = new Date(service.promotion_end_date)
-      
-      if (now >= startDate && now <= endDate && service.promotional_value) {
-        value = parseFloat(service.promotional_value)
+    if (service.is_promotional && service.promotion_start_date && service.promotion_end_date && service.promotional_value) {
+      try {
+        const now = new Date()
+        const startDate = new Date(service.promotion_start_date)
+        const endDate = new Date(service.promotion_end_date)
+        
+        // O backend salva datas sem timezone (timezone-naive) e assume UTC
+        // Para comparar corretamente, vamos usar timestamps
+        // Mas primeiro, vamos garantir que as datas estão corretas
+        const nowTime = now.getTime()
+        const startTime = startDate.getTime()
+        const endTime = endDate.getTime()
+        
+        // Verificar se a promoção está ativa (agora está entre início e fim)
+        // Incluindo os limites (>= e <=)
+        if (nowTime >= startTime && nowTime <= endTime) {
+          value = parseFloat(service.promotional_value)
+          console.log('Promoção ativa! Valor promocional:', value)
+        } else {
+          console.log('Promoção não está ativa. Agora:', nowTime, 'Início:', startTime, 'Fim:', endTime)
+        }
+      } catch (error) {
+        console.error('Erro ao verificar promoção:', error)
+        // Em caso de erro, usar o valor normal
+        value = parseFloat(service.price)
       }
     }
     
