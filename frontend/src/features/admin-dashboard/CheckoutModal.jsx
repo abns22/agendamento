@@ -74,7 +74,7 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     
     // Verificar se há promoção ativa
     // O backend usa PromotionService.get_effective_price() que verifica se a promoção está ativa
-    // Vamos replicar a mesma lógica aqui
+    // Replicar a mesma lógica: verificar se is_promotional é true e se a data atual está dentro do intervalo
     let value = parseFloat(service.price)
     
     if (service.is_promotional && service.promotion_start_date && service.promotion_end_date && service.promotional_value) {
@@ -83,20 +83,16 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
         const startDate = new Date(service.promotion_start_date)
         const endDate = new Date(service.promotion_end_date)
         
-        // O backend salva datas sem timezone (timezone-naive) e assume UTC
-        // Para comparar corretamente, vamos usar timestamps
-        // Mas primeiro, vamos garantir que as datas estão corretas
+        // O backend salva datas sem timezone (timezone-naive) e assume UTC ao comparar
+        // Para comparar corretamente no frontend, vamos usar timestamps
+        // Isso evita problemas de timezone entre cliente e servidor
         const nowTime = now.getTime()
         const startTime = startDate.getTime()
         const endTime = endDate.getTime()
         
-        // Verificar se a promoção está ativa (agora está entre início e fim)
-        // Incluindo os limites (>= e <=)
+        // Verificar se a promoção está ativa (agora está entre início e fim, incluindo os limites)
         if (nowTime >= startTime && nowTime <= endTime) {
           value = parseFloat(service.promotional_value)
-          console.log('Promoção ativa! Valor promocional:', value)
-        } else {
-          console.log('Promoção não está ativa. Agora:', nowTime, 'Início:', startTime, 'Fim:', endTime)
         }
       } catch (error) {
         console.error('Erro ao verificar promoção:', error)
