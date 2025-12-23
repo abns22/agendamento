@@ -25,32 +25,39 @@ router = APIRouter(prefix="/admin/clients", tags=["Admin - Clients"])
     "",
     response_model=List[ClientResponse],
     summary="Listar clientes",
-    description="Retorna todos os clientes do tenant autenticado, opcionalmente filtrados por nome ou telefone."
+    description="Retorna todos os clientes do tenant autenticado, opcionalmente filtrados por nome/telefone ou mês de aniversário."
 )
 async def list_clients(
-    search: Optional[str] = Query(None, description="Buscar por nome ou telefone"),
+    search: Optional[str] = Query(None, description="Buscar por nome ou telefone (busca parcial)"),
+    birth_month: Optional[int] = Query(None, ge=1, le=12, description="Filtrar aniversariantes do mês (1-12, onde 1=Janeiro, 12=Dezembro)"),
     tenant: Tenant = Depends(get_current_active_tenant),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Lista todos os clientes do tenant autenticado.
     
-    Permite buscar por nome ou telefone.
+    Permite buscar por nome ou telefone e filtrar por mês de aniversário.
     
     Args:
-        search: Termo de busca (opcional)
+        search: Termo de busca parcial por nome ou telefone (opcional)
+        birth_month: Mês de aniversário para filtrar (1-12, opcional)
         tenant: Tenant autenticado
         db: Sessão do banco de dados
         
     Returns:
         List[ClientResponse]: Lista de clientes do tenant
+        
+    Exemplos:
+        - GET /api/v1/admin/clients?search=joão - Busca clientes com "joão" no nome ou telefone
+        - GET /api/v1/admin/clients?birth_month=5 - Lista aniversariantes de maio
+        - GET /api/v1/admin/clients?search=maria&birth_month=12 - Busca "maria" que faz aniversário em dezembro
     """
     tenant_id_str = str(tenant.id)
     
     query = select(Client).where(Client.tenant_id == tenant_id_str)
     
     # Aplicar filtro de busca se fornecido
-    # MySQL não suporta ilike, usar like com lower()
+    # PostgreSQL suporta ilike, mas vamos usar func.lower() para compatibilidade
     if search:
         search_term = f"%{search.lower()}%"
         query = query.where(
@@ -60,8 +67,29 @@ async def list_clients(
             )
         )
     
-    # Ordenar por nome
-    query = query.order_by(Client.name)
+    # Aplicar filtro de mês de aniversário se fornecido
+    # Usar EXTRACT(MONTH FROM birth_date) para PostgreSQL
+    if birth_month is not None:
+        # Filtrar apenas clientes que têm data de nascimento e o mês corresponde
+        query = query.where(
+            and_(
+                Client.birth_date.isnot(None),
+                extract('month', Client.birth_date) == birth_month
+            )
+        )
+    
+    # Ordenação:
+    # - Se birth_month estiver ativo, ordenar por dia do nascimento (dia do mês)
+    # - Caso contrário, ordenar por nome (alfabética)
+    if birth_month is not None:
+        # Ordenar por dia do mês do nascimento (1-31), depois por nome
+        query = query.order_by(
+            extract('day', Client.birth_date).asc(),
+            Client.name.asc()
+        )
+    else:
+        # Ordenar alfabeticamente por nome
+        query = query.order_by(Client.name.asc())
     
     result = await db.execute(query)
     clients = result.scalars().all()
