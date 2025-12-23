@@ -15,6 +15,7 @@ import CaixaPage from './features/admin-dashboard/CaixaPage'
 import DebtorsPage from './features/admin-dashboard/DebtorsPage'
 import InventoryPage from './features/admin-dashboard/InventoryPage'
 import ProductsPage from './features/admin-dashboard/ProductsPage'
+import ClientsPage from './features/admin-dashboard/ClientsPage'
 import SuperAdminPage from './features/admin-dashboard/SuperAdminPage'
 
 function App() {
@@ -73,6 +74,7 @@ function App() {
                     <Route path="billing/success" element={<BillingPage />} />
                     <Route path="caixa" element={<CaixaPage />} />
                     <Route path="devedores" element={<DebtorsPage />} />
+                    <Route path="clientes" element={<ClientsPage />} />
                     <Route path="inventario" element={<InventoryPage />} />
                     <Route path="produtos" element={<ProductsPage />} />
                     <Route path="super-admin" element={<SuperAdminPage />} />
