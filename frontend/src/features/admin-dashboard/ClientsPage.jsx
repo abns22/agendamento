@@ -20,6 +20,7 @@ const ClientsPage = () => {
   const [error, setError] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(null) // null = "Todos", 1-12 = mês específico
+  const [tenantName, setTenantName] = useState('Estúdio') // Nome do tenant para mensagem do WhatsApp
 
   // Meses do ano
   const months = [
@@ -37,6 +38,35 @@ const ClientsPage = () => {
     { value: 11, label: 'Novembro' },
     { value: 12, label: 'Dezembro' }
   ]
+
+  // Carregar nome do tenant ao montar o componente
+  useEffect(() => {
+    const fetchTenantName = async () => {
+      try {
+        const response = await api.get('/api/v1/admin/tenant')
+        const tenantData = response.data
+        
+        // Formatar slug como nome do estúdio
+        // Ex: "estudio-bella" → "Estúdio Bella"
+        if (tenantData.slug) {
+          const formattedName = tenantData.slug
+            .split('-')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ')
+          setTenantName(formattedName)
+        } else if (tenantData.name) {
+          setTenantName(tenantData.name)
+        } else {
+          setTenantName('Estúdio')
+        }
+      } catch (error) {
+        console.error('Erro ao buscar nome do tenant:', error)
+        setTenantName('Estúdio') // Fallback
+      }
+    }
+    
+    fetchTenantName()
+  }, [])
 
   // Carregar clientes quando busca ou mês mudarem
   useEffect(() => {
@@ -113,9 +143,9 @@ const ClientsPage = () => {
     // Remover caracteres não numéricos do telefone
     const phone = client.phone_number.replace(/\D/g, '')
     
-    // Mensagem pré-definida
+    // Mensagem pré-definida usando o nome do tenant
     const message = encodeURIComponent(
-      `Olá ${client.name}, o Synkhro deseja um feliz aniversário! 🎂🎉`
+      `Olá ${client.name}, o ${tenantName} deseja um feliz aniversário! 🎂🎉`
     )
     
     // Link do WhatsApp (formato internacional: 55 + DDD + número)
