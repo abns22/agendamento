@@ -635,22 +635,26 @@ const AgendaPage = () => {
 
                 {/* Indicador visual melhorado */}
                 <div className="flex-shrink-0">
-                  <div 
-                    className={`w-4 h-4 rounded-full shadow-md ${
-                      apt.is_manual_block 
-                        ? 'bg-orange-400' 
-                        : apt.status === 'CONFIRMED' 
-                          ? 'bg-green-400' 
-                          : apt.status === 'CANCELED'
-                            ? 'bg-red-400'
-                            : 'bg-yellow-400'
-                    }`}
-                    style={{
-                      backgroundColor: apt.service_display_color_code && !apt.is_manual_block
-                        ? apt.service_display_color_code
-                        : undefined
-                    }}
-                  ></div>
+                  {apt.status === 'COMPLETED' ? (
+                    <span className="text-2xl" title="Pagamento finalizado">✅</span>
+                  ) : (
+                    <div 
+                      className={`w-4 h-4 rounded-full shadow-md ${
+                        apt.is_manual_block 
+                          ? 'bg-orange-400' 
+                          : apt.status === 'CONFIRMED' 
+                            ? 'bg-green-400' 
+                            : apt.status === 'CANCELED'
+                              ? 'bg-red-400'
+                              : 'bg-yellow-400'
+                      }`}
+                      style={{
+                        backgroundColor: apt.service_display_color_code && !apt.is_manual_block
+                          ? apt.service_display_color_code
+                          : undefined
+                      }}
+                    ></div>
+                  )}
                 </div>
               </div>
             </Card>
@@ -719,7 +723,7 @@ const AgendaPage = () => {
               <div className="space-y-2 pt-4 border-t border-gray-200">
                 <p className="text-sm font-semibold text-gray-600 mb-3">Ações:</p>
                 
-                {selectedAppointment.status !== 'CONFIRMED' && (
+                {selectedAppointment.status !== 'CONFIRMED' && selectedAppointment.status !== 'COMPLETED' && (
                   <Button
                     variant="primary"
                     onClick={() => handleUpdateStatus('CONFIRMED')}
