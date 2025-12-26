@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from uuid import UUID
-from typing import Annotated, List
+from typing import Annotated, List, Dict, Any
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_active_tenant
@@ -16,6 +16,7 @@ from app.models.tenant import Tenant
 from app.models.service import Service
 
 from app.schemas.service import ServiceCreate, ServiceUpdate, ServiceResponse
+from app.services.promotion_service import PromotionService
 
 router = APIRouter(prefix="/admin/services", tags=["Admin - Services"])
 
@@ -52,12 +53,36 @@ async def list_services(
             detail="tenant_id inválido"
         )
     
+    # Ordenar serviços: promoções primeiro (is_promotional DESC), depois por nome
     result = await db.execute(
-        select(Service).where(Service.tenant_id == tenant_id_str)
+        select(Service).where(
+            Service.tenant_id == tenant_id_str
+        ).order_by(
+            Service.is_promotional.desc(),  # Promoções primeiro (True antes de False)
+            Service.name.asc()  # Depois ordenar por nome alfabeticamente
+        )
     )
     services = result.scalars().all()
     
-    return [ServiceResponse.model_validate(service) for service in services]
+    # Adicionar promotion_active calculado e ordenar resultado final
+    services_with_promotion = []
+    for service in services:
+        # Calcular se promoção está ativa
+        is_active, _ = PromotionService.is_promotion_active(service)
+        # Converter para dict e adicionar promotion_active
+        service_dict = ServiceResponse.model_validate(service).model_dump()
+        service_dict['promotion_active'] = is_active
+        services_with_promotion.append(service_dict)
+    
+    # Ordenar: promoções ativas primeiro, depois promoções inativas, depois não-promocionais
+    services_with_promotion.sort(key=lambda x: (
+        not x.get('promotion_active', False),  # False primeiro (promoções ativas)
+        not x.get('is_promotional', False),  # Promoções primeiro
+        x.get('name', '')  # Ordem alfabética
+    ))
+    
+    # Retornar ServiceResponse com promotion_active incluído via model_validate com allow_extra
+    return [ServiceResponse.model_validate(s) for s in services_with_promotion]
 
 
 @router.get(

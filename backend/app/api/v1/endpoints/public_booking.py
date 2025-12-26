@@ -421,8 +421,14 @@ async def get_public_services(
         # Buscar tenant pelo slug
         tenant = await get_tenant_by_slug(tenant_slug, db)
         
-        # Buscar serviços do tenant
-        services_query = select(Service).where(Service.tenant_id == tenant.id)
+        # Buscar serviços do tenant, ordenando promoções primeiro
+        # Ordenar por is_promotional DESC (True primeiro) e depois por nome
+        services_query = select(Service).where(
+            Service.tenant_id == tenant.id
+        ).order_by(
+            Service.is_promotional.desc(),  # Promoções primeiro (True antes de False)
+            Service.name.asc()  # Depois ordenar por nome
+        )
         services_result = await db.execute(services_query)
         services = services_result.scalars().all()
         
@@ -450,6 +456,13 @@ async def get_public_services(
             }
             
             result.append(PublicServiceResponse(**service_dict))
+        
+        # Ordenar resultado final: promoções ativas primeiro, depois promoções inativas, depois não-promocionais
+        result.sort(key=lambda x: (
+            not x.promotion_active,  # False primeiro (promoções ativas), depois True
+            not x.is_promotional,  # Promoções primeiro, depois não-promocionais
+            x.name  # Ordem alfabética
+        ))
         
         return result
         

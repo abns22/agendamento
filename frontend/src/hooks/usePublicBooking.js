@@ -68,12 +68,12 @@ export const useAvailableSlots = () => {
 
     try {
       const url = `/api/v1/booking/${tenantSlug}/slots`
-      const params = {
-        service_ids: ids,  // Enviar como array
-        date: date,
-      }
-      console.log('📡 useAvailableSlots: Fazendo requisição para:', url, params)
-      const response = await api.get(url, { params })
+      // FastAPI espera múltiplos parâmetros com o mesmo nome: service_ids=uuid1&service_ids=uuid2
+      // Construir URL manualmente para evitar axios usar service_ids[]=...
+      const serviceIdsParam = ids.map(id => `service_ids=${encodeURIComponent(id)}`).join('&')
+      const fullUrl = `${url}?${serviceIdsParam}&date=${encodeURIComponent(date)}`
+      console.log('📡 useAvailableSlots: Fazendo requisição para:', fullUrl)
+      const response = await api.get(fullUrl)
       console.log('✅ useAvailableSlots: Slots recebidos:', response.data)
       setSlots(response.data?.available_slots || [])
     } catch (err) {

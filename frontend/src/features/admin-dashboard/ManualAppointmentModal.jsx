@@ -89,15 +89,17 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
   // Calcular duração total e valor total
   const totalDuration = selectedServices.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   const totalValue = selectedServices.reduce((sum, s) => {
-    // Verificar se há promoção ativa
-    const isPromoActive = s.is_promotional && s.promotion_start_date && s.promotion_end_date
-    if (isPromoActive) {
-      const now = new Date()
-      const startDate = new Date(s.promotion_start_date)
-      const endDate = new Date(s.promotion_end_date)
-      if (now >= startDate && now <= endDate && s.promotional_value) {
-        return sum + parseFloat(s.promotional_value)
-      }
+    // Verificar se há promoção ativa (usar promotion_active se disponível, senão calcular)
+    const isPromoActive = s.promotion_active !== undefined 
+      ? s.promotion_active 
+      : (s.is_promotional && s.promotion_start_date && s.promotion_end_date && (() => {
+          const now = new Date()
+          const startDate = new Date(s.promotion_start_date)
+          const endDate = new Date(s.promotion_end_date)
+          return now >= startDate && now <= endDate && s.promotional_value
+        })())
+    if (isPromoActive && s.promotional_value) {
+      return sum + parseFloat(s.promotional_value)
     }
     return sum + parseFloat(s.price)
   }, 0)
@@ -323,16 +325,45 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
             <div className="space-y-2 max-h-60 overflow-y-auto border-2 border-gray-300 rounded-lg p-3">
               {services.map(service => {
                 const isSelected = isServiceSelected(service.id)
+                // Verificar se promoção está ativa (usar promotion_active se disponível, senão calcular)
+                const isPromotionActive = service.promotion_active !== undefined 
+                  ? service.promotion_active 
+                  : (service.is_promotional && service.promotion_start_date && service.promotion_end_date && (() => {
+                      const now = new Date()
+                      const startDate = new Date(service.promotion_start_date)
+                      const endDate = new Date(service.promotion_end_date)
+                      return now >= startDate && now <= endDate && service.promotional_value
+                    })())
+                const effectivePrice = isPromotionActive && service.promotional_value
+                  ? parseFloat(service.promotional_value)
+                  : parseFloat(service.price)
+                const originalPrice = parseFloat(service.price)
+                
                 return (
                   <div
                     key={service.id}
                     onClick={() => handleServiceToggle(service)}
-                    className={`flex items-center p-3 rounded-lg cursor-pointer transition-colors ${
+                    className={`flex items-center p-3 rounded-lg cursor-pointer transition-colors relative ${
                       isSelected
                         ? 'bg-primary bg-opacity-10 border-2 border-primary'
                         : 'bg-gray-50 border-2 border-transparent hover:bg-gray-100'
                     }`}
+                    style={{
+                      borderColor: !isSelected && isPromotionActive && service.promotion_color_code
+                        ? service.promotion_color_code
+                        : undefined
+                    }}
                   >
+                    {/* Badge de Promoção */}
+                    {isPromotionActive && service.promotion_display_name && !isSelected && (
+                      <div 
+                        className="absolute top-2 right-2 px-2 py-1 rounded-full text-xs font-bold text-white shadow-md z-10"
+                        style={{ backgroundColor: service.promotion_color_code || '#FF0000' }}
+                      >
+                        {service.promotion_display_name}
+                      </div>
+                    )}
+                    
                     <div className={`w-5 h-5 rounded border-2 flex items-center justify-center mr-3 flex-shrink-0 ${
                       isSelected
                         ? 'bg-primary border-primary'
@@ -346,8 +377,19 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-text">{service.name}</div>
-                      <div className="text-sm text-gray-600">
-                        {formatDuration(service.duration_minutes)} • {formatCurrency(parseFloat(service.price))}
+                      <div className="text-sm text-gray-600 flex items-center gap-2">
+                        <span>{formatDuration(service.duration_minutes)}</span>
+                        <span>•</span>
+                        <div className="flex items-center gap-2">
+                          {isPromotionActive && originalPrice > effectivePrice && (
+                            <span className="text-gray-400 line-through text-xs">
+                              {formatCurrency(originalPrice)}
+                            </span>
+                          )}
+                          <span className={`font-bold ${isPromotionActive ? 'text-red-600' : 'text-gray-600'}`}>
+                            {formatCurrency(effectivePrice)}
+                          </span>
+                        </div>
                       </div>
                     </div>
                     {/* Botão para remover (se selecionado) */}

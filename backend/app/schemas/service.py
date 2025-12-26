@@ -80,6 +80,7 @@ class ServiceResponse(ServiceBase):
     
     # Campos de promoção (incluídos do ServiceBase)
     is_promotional: bool = False
+    promotion_active: Optional[bool] = Field(None, description="Se a promoção está ativa no momento (calculado)")
     promotion_start_date: Optional[datetime] = None
     promotion_end_date: Optional[datetime] = None
     promotional_value: Optional[Decimal] = None
