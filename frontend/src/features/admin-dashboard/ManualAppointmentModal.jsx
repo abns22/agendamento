@@ -90,14 +90,15 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
   const totalDuration = selectedServices.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   const totalValue = selectedServices.reduce((sum, s) => {
     // Verificar se há promoção ativa (usar promotion_active se disponível, senão calcular)
-    const isPromoActive = s.promotion_active !== undefined 
-      ? s.promotion_active 
-      : (s.is_promotional && s.promotion_start_date && s.promotion_end_date && (() => {
-          const now = new Date()
-          const startDate = new Date(s.promotion_start_date)
-          const endDate = new Date(s.promotion_end_date)
-          return now >= startDate && now <= endDate && s.promotional_value
-        })())
+    let isPromoActive = false
+    if (s.promotion_active !== undefined && s.promotion_active !== null) {
+      isPromoActive = s.promotion_active === true
+    } else if (s.is_promotional && s.promotion_start_date && s.promotion_end_date && s.promotional_value) {
+      const now = new Date()
+      const startDate = new Date(s.promotion_start_date)
+      const endDate = new Date(s.promotion_end_date)
+      isPromoActive = now >= startDate && now <= endDate
+    }
     if (isPromoActive && s.promotional_value) {
       return sum + parseFloat(s.promotional_value)
     }
@@ -326,14 +327,17 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
               {services.map(service => {
                 const isSelected = isServiceSelected(service.id)
                 // Verificar se promoção está ativa (usar promotion_active se disponível, senão calcular)
-                const isPromotionActive = service.promotion_active !== undefined 
-                  ? service.promotion_active 
-                  : (service.is_promotional && service.promotion_start_date && service.promotion_end_date && (() => {
-                      const now = new Date()
-                      const startDate = new Date(service.promotion_start_date)
-                      const endDate = new Date(service.promotion_end_date)
-                      return now >= startDate && now <= endDate && service.promotional_value
-                    })())
+                let isPromotionActive = false
+                if (service.promotion_active !== undefined && service.promotion_active !== null) {
+                  // Usar promotion_active do backend se disponível
+                  isPromotionActive = service.promotion_active === true
+                } else if (service.is_promotional && service.promotion_start_date && service.promotion_end_date && service.promotional_value) {
+                  // Calcular manualmente se promotion_active não estiver disponível
+                  const now = new Date()
+                  const startDate = new Date(service.promotion_start_date)
+                  const endDate = new Date(service.promotion_end_date)
+                  isPromotionActive = now >= startDate && now <= endDate
+                }
                 const effectivePrice = isPromotionActive && service.promotional_value
                   ? parseFloat(service.promotional_value)
                   : parseFloat(service.price)

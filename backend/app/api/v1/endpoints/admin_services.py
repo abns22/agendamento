@@ -70,7 +70,8 @@ async def list_services(
         # Calcular se promoção está ativa
         is_active, _ = PromotionService.is_promotion_active(service)
         # Converter para dict e adicionar promotion_active
-        service_dict = ServiceResponse.model_validate(service).model_dump()
+        service_response = ServiceResponse.model_validate(service)
+        service_dict = service_response.model_dump()
         service_dict['promotion_active'] = is_active
         services_with_promotion.append(service_dict)
     
@@ -81,8 +82,12 @@ async def list_services(
         x.get('name', '')  # Ordem alfabética
     ))
     
-    # Retornar ServiceResponse com promotion_active incluído via model_validate com allow_extra
-    return [ServiceResponse.model_validate(s) for s in services_with_promotion]
+    # Retornar ServiceResponse com promotion_active incluído (usando model_validate que aceita campos extras)
+    result = []
+    for s in services_with_promotion:
+        # Criar ServiceResponse a partir do dict (promotion_active é opcional no schema, então será aceito)
+        result.append(ServiceResponse(**s))
+    return result
 
 
 @router.get(
@@ -138,7 +143,13 @@ async def get_service(
             detail="Serviço não encontrado"
         )
     
-    return ServiceResponse.model_validate(service)
+    # Calcular promotion_active e retornar com esse campo
+    is_active, _ = PromotionService.is_promotion_active(service)
+    service_dict = ServiceResponse.model_validate(service).model_dump()
+    service_dict['promotion_active'] = is_active
+    
+    # Retornar usando ServiceResponse(**service_dict) para incluir promotion_active
+    return ServiceResponse(**service_dict)
 
 
 @router.post(
