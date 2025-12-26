@@ -42,23 +42,38 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
   useEffect(() => {
     if (isOpen && service) {
       calculateGrossValue()
-      // Inicializar valueDue com o valor total quando abrir (usando o mesmo cálculo de calculateGrossValue)
-      const now = new Date()
-      let value = parseFloat(service.price)
-      if (service.is_promotional && service.promotion_start_date && service.promotion_end_date && service.promotional_value) {
-        const startDate = new Date(service.promotion_start_date)
-        const endDate = new Date(service.promotion_end_date)
-        // Comparar timestamps para evitar problemas de timezone
-        const nowTime = now.getTime()
-        const startTime = startDate.getTime()
-        const endTime = endDate.getTime()
-        if (nowTime >= startTime && nowTime <= endTime) {
-          value = parseFloat(service.promotional_value)
+      // Inicializar valueDue como vazio quando pagamento é à vista
+      // Só será preenchido se o usuário marcar como "a prazo"
+      if (!isPaid) {
+        const now = new Date()
+        let value = parseFloat(service.price)
+        if (service.is_promotional && service.promotion_start_date && service.promotion_end_date && service.promotional_value) {
+          const startDate = new Date(service.promotion_start_date)
+          const endDate = new Date(service.promotion_end_date)
+          // Comparar timestamps para evitar problemas de timezone
+          const nowTime = now.getTime()
+          const startTime = startDate.getTime()
+          const endTime = endDate.getTime()
+          if (nowTime >= startTime && nowTime <= endTime) {
+            value = parseFloat(service.promotional_value)
+          }
         }
+        setValueDue(value.toFixed(2))
+      } else {
+        setValueDue('')
       }
-      setValueDue(value.toFixed(2))
     }
-  }, [isOpen, service])
+  }, [isOpen, service, isPaid])
+  
+  // Limpar valueDue quando pagamento for marcado como à vista
+  useEffect(() => {
+    if (isPaid) {
+      setValueDue('')
+      setClientName('')
+      setClientPhone('')
+      setDueDate(null)
+    }
+  }, [isPaid])
   
   const fetchPaymentMethods = async () => {
     try {
@@ -215,7 +230,8 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     const hasValueDue = valueDue && parseFloat(valueDue) > 0
     
     // Validações para pagamento (à vista ou parcial)
-    if (isPaid || hasValueDue) {
+    // Sempre validar quando há pagamentos ou quando é pagamento à vista
+    if (paymentEntries.length > 0 || isPaid) {
       const totalPaid = calculateTotalPaid()
       const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
       const totalCovered = totalPaid + valueDueNum
@@ -242,16 +258,6 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
         setError('Data de vencimento é obrigatória quando há valor a receber')
         return
       }
-    }
-    
-    // Validar que a soma dos pagamentos + valor a receber = valor final após desconto
-    const totalPaid = paymentEntries.reduce((sum, pe) => sum + parseFloat(pe.value_paid || 0), 0)
-    const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
-    const totalCovered = totalPaid + valueDueNum
-    
-    if (Math.abs(totalCovered - finalValueAfterDiscount) > 0.01) {
-      setError(`A soma dos pagamentos (${totalPaid.toFixed(2)}) + valor a receber (${valueDueNum.toFixed(2)}) deve ser igual ao valor final após desconto (${finalValueAfterDiscount.toFixed(2)})`)
-      return
     }
     
     try {
