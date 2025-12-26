@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { useAvailableSlots } from '../../hooks/usePublicBooking'
@@ -15,13 +15,19 @@ const TimeSlotPicker = ({ tenantSlug, serviceIds, onSelectDateTime, selectedDate
   const [selectedDateState, setSelectedDateState] = useState(selectedDate || null)
   const { slots, loading, error, fetchSlots } = useAvailableSlots()
 
+  // Normalizar serviceIds para string estável (para comparação no useEffect)
+  const serviceIdsKey = useMemo(() => {
+    if (!serviceIds || !Array.isArray(serviceIds) || serviceIds.length === 0) return ''
+    return [...serviceIds].sort().join(',')
+  }, [serviceIds])
+
   // Buscar slots quando data ou serviços mudarem
   useEffect(() => {
     if (tenantSlug && serviceIds && serviceIds.length > 0 && selectedDateState) {
       const dateStr = format(selectedDateState, 'yyyy-MM-dd')
       fetchSlots(tenantSlug, serviceIds, dateStr)
     }
-  }, [tenantSlug, serviceIds, selectedDateState, fetchSlots])
+  }, [tenantSlug, serviceIdsKey, selectedDateState, fetchSlots])
 
   // Filtrar datas passadas e definir data mínima (hoje)
   const minDate = new Date()

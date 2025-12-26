@@ -1,7 +1,7 @@
 /**
  * Custom hook para operações de agendamento público.
  */
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { api } from '../utils/api'
 
 /**
@@ -53,7 +53,7 @@ export const useAvailableSlots = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const fetchSlots = async (tenantSlug, serviceIds, date) => {
+  const fetchSlots = useCallback(async (tenantSlug, serviceIds, date) => {
     // serviceIds pode ser um único ID ou um array de IDs
     const ids = Array.isArray(serviceIds) ? serviceIds : [serviceIds]
     
@@ -91,7 +91,7 @@ export const useAvailableSlots = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   return { slots, loading, error, fetchSlots }
 }

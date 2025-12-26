@@ -213,16 +213,6 @@ const ServiceSelection = ({ tenantSlug, onSelectServices, selectedServices = [] 
                 : (borderColor || '#e5e7eb')
             }}
           >
-            {/* Badge de Promoção */}
-            {isPromotionActive && service.promotion_display_name && !isSelected && (
-              <div 
-                className="absolute top-3 right-12 px-3 py-1 rounded-full text-xs font-bold text-white shadow-md z-10"
-                style={{ backgroundColor: borderColor || '#FF0000' }}
-              >
-                {service.promotion_display_name}
-              </div>
-            )}
-            
             <div className="flex items-start justify-between gap-3">
               {/* Checkbox */}
               <div className="flex-shrink-0 mt-1">
@@ -281,6 +271,16 @@ const ServiceSelection = ({ tenantSlug, onSelectServices, selectedServices = [] 
                 </div>
               )}
             </div>
+            
+            {/* Badge de Promoção no canto inferior direito */}
+            {isPromotionActive && service.promotion_display_name && !isSelected && (
+              <div 
+                className="absolute bottom-3 right-3 px-2 py-1 rounded-full text-xs font-bold text-white shadow-md z-10"
+                style={{ backgroundColor: borderColor || '#FF0000' }}
+              >
+                {service.promotion_display_name}
+              </div>
+            )}
           </div>
         )})}
       </div>
