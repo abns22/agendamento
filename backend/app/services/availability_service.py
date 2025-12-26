@@ -377,4 +377,202 @@ class AvailabilityService:
         
         # Se houver conflitos, o slot não está disponível
         return len(conflicting_appointments) == 0
+    
+    @staticmethod
+    async def is_slot_available_with_duration(
+        db_session: AsyncSession,
+        tenant_id: UUID,
+        start_datetime: datetime,
+        total_duration_minutes: int
+    ) -> bool:
+        """
+        Verifica se um horário específico está disponível para agendamento usando duração total.
+        
+        Este método é usado para verificação de disponibilidade com múltiplos serviços,
+        onde a duração total já foi calculada.
+        
+        Args:
+            db_session: Sessão assíncrona do banco de dados
+            tenant_id: UUID do tenant
+            start_datetime: Data e hora de início do agendamento (UTC)
+            total_duration_minutes: Duração total em minutos (soma de todos os serviços)
+            
+        Returns:
+            bool: True se o slot estiver disponível, False caso contrário
+            
+        Raises:
+            ValueError: Se não houver configuração de horário
+        """
+        tenant_id_str = str(tenant_id) if tenant_id else None
+        if not tenant_id_str:
+            raise ValueError("tenant_id é obrigatório")
+        
+        # Calcular horário de fim
+        end_datetime = start_datetime + timedelta(minutes=total_duration_minutes)
+        
+        # Buscar configuração de horário para o dia da semana
+        target_date = start_datetime.date()
+        day_of_week = target_date.weekday()
+        
+        schedule_query = select(ScheduleConfig).where(
+            and_(
+                ScheduleConfig.tenant_id == tenant_id_str,
+                ScheduleConfig.day_of_week == day_of_week
+            )
+        )
+        schedule_result = await db_session.execute(schedule_query)
+        schedule_config = schedule_result.scalar_one_or_none()
+        
+        if not schedule_config:
+            raise ValueError(f"Configuração de horário não encontrada para o dia {day_of_week}")
+        
+        if schedule_config.is_closed:
+            return False  # Estúdio fechado
+        
+        # Verificar se o horário está dentro do funcionamento
+        opening_time = schedule_config.start_time
+        closing_time = schedule_config.end_time
+        opening_datetime = datetime.combine(target_date, opening_time)
+        closing_datetime = datetime.combine(target_date, closing_time)
+        
+        # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
+        if start_datetime.tzinfo is not None:
+            start_datetime = start_datetime.replace(tzinfo=None)
+        if end_datetime.tzinfo is not None:
+            end_datetime = end_datetime.replace(tzinfo=None)
+        
+        # Verificar se está dentro do horário de funcionamento
+        if start_datetime < opening_datetime or end_datetime > closing_datetime:
+            return False
+        
+        # Buscar agendamentos que possam colidir
+        appointments_query = select(Appointment).where(
+            and_(
+                Appointment.tenant_id == tenant_id_str,
+                Appointment.start_datetime < end_datetime,
+                Appointment.end_datetime > start_datetime,
+                Appointment.status != AppointmentStatus.CANCELED
+            )
+        )
+        appointments_result = await db_session.execute(appointments_query)
+        conflicting_appointments = appointments_result.scalars().all()
+        
+        # Se houver conflitos, o slot não está disponível
+        return len(conflicting_appointments) == 0
+    
+    @staticmethod
+    async def get_available_slots_with_duration(
+        db_session: AsyncSession,
+        tenant_id: UUID,
+        total_duration_minutes: int,
+        date_str: str  # Formato: 'YYYY-MM-DD'
+    ) -> List[str]:
+        """
+        Calcula e retorna uma lista de horários disponíveis para agendamento
+        usando uma duração total fornecida (útil para múltiplos serviços).
+        
+        Args:
+            db_session: Sessão assíncrona do banco de dados
+            tenant_id: UUID do tenant (empresa)
+            total_duration_minutes: Duração total em minutos (soma de todos os serviços)
+            date_str: Data no formato 'YYYY-MM-DD'
+            
+        Returns:
+            List[str]: Lista de horários disponíveis no formato 'HH:MM'
+                      Ex: ['09:00', '09:15', '09:30', ...]
+        
+        Raises:
+            ValueError: Se a data for inválida ou não houver configuração de horário
+        """
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            raise ValueError(f"Data inválida: {date_str}. Use o formato 'YYYY-MM-DD'")
+        
+        day_of_week = target_date.weekday()
+        
+        tenant_id_str = str(tenant_id) if tenant_id else None
+        if not tenant_id_str:
+            raise ValueError("tenant_id é obrigatório")
+        
+        if total_duration_minutes <= 0:
+            raise ValueError("Duração total deve ser maior que zero")
+        
+        schedule_query = select(ScheduleConfig).where(
+            and_(
+                ScheduleConfig.tenant_id == tenant_id_str,
+                ScheduleConfig.day_of_week == day_of_week
+            )
+        )
+        schedule_result = await db_session.execute(schedule_query)
+        schedule_config = schedule_result.scalar_one_or_none()
+        
+        if not schedule_config:
+            raise ValueError(f"Configuração de horário não encontrada para {date_str}")
+        
+        if schedule_config.is_closed:
+            return []
+        
+        opening_time = schedule_config.start_time
+        closing_time = schedule_config.end_time
+        
+        start_of_day = datetime.combine(target_date, time.min)
+        end_of_day = datetime.combine(target_date, time.max)
+        
+        appointments_query = select(Appointment).where(
+            and_(
+                Appointment.tenant_id == tenant_id_str,
+                Appointment.start_datetime >= start_of_day,
+                Appointment.start_datetime < end_of_day + timedelta(days=1),
+                Appointment.status != AppointmentStatus.CANCELED
+            )
+        )
+        appointments_result = await db_session.execute(appointments_query)
+        existing_appointments = appointments_result.scalars().all()
+        
+        stop_times_query = select(StopTime).where(
+            and_(
+                StopTime.tenant_id == tenant_id_str,
+                StopTime.day_of_week == day_of_week
+            )
+        )
+        stop_times_result = await db_session.execute(stop_times_query)
+        stop_times = stop_times_result.scalars().all()
+        
+        available_slots = []
+        slot_interval = timedelta(minutes=AvailabilityService.DEFAULT_SLOT_INTERVAL_MINUTES)
+        
+        candidate_start_datetime = datetime.combine(target_date, opening_time)
+        closing_datetime = datetime.combine(target_date, closing_time)
+        
+        while True:
+            candidate_end_datetime = candidate_start_datetime + timedelta(minutes=total_duration_minutes)
+            
+            if candidate_end_datetime > closing_datetime:
+                break
+            
+            has_collision = False
+            
+            for apt in existing_appointments:
+                if (candidate_start_datetime < apt.end_datetime and 
+                    candidate_end_datetime > apt.start_datetime):
+                    has_collision = True
+                    break
+            
+            if not has_collision:
+                for stop_time in stop_times:
+                    stop_start_datetime = datetime.combine(target_date, stop_time.start_time)
+                    stop_end_datetime = datetime.combine(target_date, stop_time.end_time)
+                    if (candidate_start_datetime < stop_end_datetime and 
+                        candidate_end_datetime > stop_start_datetime):
+                        has_collision = True
+                        break
+            
+            if not has_collision:
+                time_str = candidate_start_datetime.strftime('%H:%M')
+                available_slots.append(time_str)
+            
+            candidate_start_datetime += slot_interval
+        
+        return sorted(available_slots)
 

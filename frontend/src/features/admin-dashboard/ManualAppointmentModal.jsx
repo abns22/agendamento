@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { api, formatDuration } from '../../utils/api'
+import { api, formatDuration, formatCurrency } from '../../utils/api'
 import { Modal, Button, Card } from '../../components/ui'
 
 /**
@@ -15,7 +15,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
   const [selectedTime, setSelectedTime] = useState(null)
   const [availableSlots, setAvailableSlots] = useState([])
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
-  const [selectedService, setSelectedService] = useState('')
+  const [selectedServices, setSelectedServices] = useState([]) // Array de serviços selecionados
   const [customerName, setCustomerName] = useState('')
   const [customerContact, setCustomerContact] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -26,7 +26,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
     if (isOpen) {
       setSelectedDate(new Date())
       setSelectedTime(null)
-      setSelectedService(services.length > 0 ? services[0].id : '')
+      setSelectedServices([])
       setCustomerName('')
       setCustomerContact('')
       setError(null)
@@ -69,10 +69,43 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
     setSelectedTime(time)
   }
 
+  const handleServiceToggle = (service) => {
+    const serviceId = service.id
+    const isSelected = selectedServices.find(s => s.id === serviceId)
+    
+    if (isSelected) {
+      // Remover da seleção
+      setSelectedServices(selectedServices.filter(s => s.id !== serviceId))
+    } else {
+      // Adicionar à seleção
+      setSelectedServices([...selectedServices, service])
+    }
+  }
+  
+  const isServiceSelected = (serviceId) => {
+    return selectedServices.some(s => s.id === serviceId)
+  }
+  
+  // Calcular duração total e valor total
+  const totalDuration = selectedServices.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
+  const totalValue = selectedServices.reduce((sum, s) => {
+    // Verificar se há promoção ativa
+    const isPromoActive = s.is_promotional && s.promotion_start_date && s.promotion_end_date
+    if (isPromoActive) {
+      const now = new Date()
+      const startDate = new Date(s.promotion_start_date)
+      const endDate = new Date(s.promotion_end_date)
+      if (now >= startDate && now <= endDate && s.promotional_value) {
+        return sum + parseFloat(s.promotional_value)
+      }
+    }
+    return sum + parseFloat(s.price)
+  }, 0)
+
   const validateForm = () => {
-    // Validar serviço
-    if (!selectedService || selectedService === '') {
-      setError('Selecione um serviço')
+    // Validar serviços
+    if (!selectedServices || selectedServices.length === 0) {
+      setError('Selecione pelo menos um serviço')
       return false
     }
     
@@ -146,7 +179,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
       
       const payload = {
         // tenant_id é inferido pelo backend a partir do token/header
-        service_id: selectedService,
+        service_ids: selectedServices.map(s => s.id), // Array de IDs de serviços
         data_agendamento: utcDateTime.toISOString(),
         cliente_nome: customerName.trim(),
         cliente_contato: customerContact.trim()
@@ -268,11 +301,18 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Agendamento Manual" size="lg">
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Seleção de Serviço */}
+        {/* Seleção de Serviços (Múltipla) */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Serviço *
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-semibold text-gray-700">
+              Serviços *
+            </label>
+            {selectedServices.length > 0 && (
+              <span className="text-sm text-primary font-semibold">
+                {selectedServices.length} selecionado{selectedServices.length > 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
           {services.length === 0 ? (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <p className="text-yellow-800 text-sm">
@@ -280,19 +320,75 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
               </p>
             </div>
           ) : (
-            <select
-              value={selectedService}
-              onChange={(e) => setSelectedService(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base"
-              required
-            >
-              <option value="">Selecione um serviço</option>
-              {services.map(service => (
-                <option key={service.id} value={service.id}>
-                  {service.name} {service.duration_minutes ? `(${formatDuration(service.duration_minutes)})` : ''}
-                </option>
-              ))}
-            </select>
+            <div className="space-y-2 max-h-60 overflow-y-auto border-2 border-gray-300 rounded-lg p-3">
+              {services.map(service => {
+                const isSelected = isServiceSelected(service.id)
+                return (
+                  <div
+                    key={service.id}
+                    onClick={() => handleServiceToggle(service)}
+                    className={`flex items-center p-3 rounded-lg cursor-pointer transition-colors ${
+                      isSelected
+                        ? 'bg-primary bg-opacity-10 border-2 border-primary'
+                        : 'bg-gray-50 border-2 border-transparent hover:bg-gray-100'
+                    }`}
+                  >
+                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center mr-3 flex-shrink-0 ${
+                      isSelected
+                        ? 'bg-primary border-primary'
+                        : 'border-gray-300 bg-white'
+                    }`}>
+                      {isSelected && (
+                        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-text">{service.name}</div>
+                      <div className="text-sm text-gray-600">
+                        {formatDuration(service.duration_minutes)} • {formatCurrency(parseFloat(service.price))}
+                      </div>
+                    </div>
+                    {/* Botão para remover (se selecionado) */}
+                    {isSelected && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleServiceToggle(service)
+                        }}
+                        className="ml-2 p-1 hover:bg-primary/20 rounded-full transition-colors flex-shrink-0"
+                        aria-label={`Remover ${service.name}`}
+                        type="button"
+                      >
+                        <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          
+          {/* Resumo em tempo real */}
+          {selectedServices.length > 0 && (
+            <div className="mt-3 bg-primary/5 border-2 border-primary/20 rounded-lg p-3">
+              <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-4">
+                  <span className="font-semibold text-text">
+                    Total: <span className="text-primary">{selectedServices.length}</span> serviço{selectedServices.length > 1 ? 's' : ''}
+                  </span>
+                  <span className="font-semibold text-text">
+                    Tempo: <span className="text-primary">{formatDuration(totalDuration)}</span>
+                  </span>
+                </div>
+                <span className="text-lg font-bold text-primary">
+                  {formatCurrency(totalValue)}
+                </span>
+              </div>
+            </div>
           )}
         </div>
 
@@ -501,7 +597,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
             disabled={
               isSubmitting || 
               !selectedTime || 
-              !selectedService || 
+              selectedServices.length === 0 || 
               !customerName.trim() || 
               !customerContact.trim() ||
               services.length === 0

@@ -35,6 +35,13 @@ class Service(Base):
     display_color_code = Column(String(7), nullable=True)  # Cor de exibição na Agenda Admin (ex: "#4A90E2")
     long_description = Column(Text, nullable=True)  # Descrição detalhada do serviço
     
+    # Relação Many-to-Many com Appointments através de AppointmentService
+    appointments = relationship(
+        "Appointment",
+        secondary="appointment_services",
+        back_populates="services"
+    )
+    
     def __repr__(self):
         return f"<Service(id={self.id}, name='{self.name}', duration={self.duration_minutes}min)>"
 

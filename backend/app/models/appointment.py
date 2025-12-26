@@ -26,7 +26,7 @@ class Appointment(Base):
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
-    service_id = Column(String(36), ForeignKey("services.id"), nullable=True, index=True)  # Nullable para bloqueios
+    service_id = Column(String(36), ForeignKey("services.id"), nullable=True, index=True)  # DEPRECATED: Use services relationship. Mantido para compatibilidade com bloqueios e dados existentes
     customer_name = Column(String(200), nullable=True)  # Nullable para bloqueios
     customer_phone = Column(String(20), nullable=True)  # Nullable para bloqueios
     start_datetime = Column(DateTime, nullable=False, index=True)  # UTC (MySQL não suporta timezone=True)
@@ -36,10 +36,19 @@ class Appointment(Base):
     description = Column(Text, nullable=True)  # Descrição do bloqueio (ex: "Almoço Prolongado")
     cancellation_reason = Column(Text, nullable=True)  # Motivo do cancelamento (quando status = CANCELED)
     # Campos de histórico financeiro (após finalização)
+    total_value = Column(DECIMAL(10, 2), nullable=True)  # Valor total agendado (soma dos serviços com promoções aplicadas na data do agendamento)
     final_sale_value = Column(DECIMAL(10, 2), nullable=True)  # Valor final de venda (para histórico)
     service_cost = Column(DECIMAL(10, 2), nullable=True)  # Custo do serviço (para histórico)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    # Relação Many-to-Many com Services através de AppointmentService
+    services = relationship(
+        "Service",
+        secondary="appointment_services",
+        back_populates="appointments",
+        lazy="selectin"  # Carregar serviços junto com o appointment
+    )
     
     def __repr__(self):
         return f"<Appointment(id={self.id}, tenant_id={self.tenant_id}, {self.start_datetime} - {self.status})>"

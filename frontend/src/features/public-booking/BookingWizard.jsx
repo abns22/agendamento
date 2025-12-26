@@ -16,7 +16,7 @@ const BookingWizard = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const [step, setStep] = useState(1) // 1: Serviço, 2: Data/Hora, 3: Formulário
-  const [selectedService, setSelectedService] = useState(null)
+  const [selectedServices, setSelectedServices] = useState([]) // Array de serviços selecionados
   const [selectedDate, setSelectedDate] = useState(null)
   const [selectedTime, setSelectedTime] = useState(null)
   const [selectedDateTime, setSelectedDateTime] = useState(null)
@@ -73,10 +73,17 @@ const BookingWizard = () => {
     }
   }, [tenantSlug])
 
-  // Avançar para seleção de data/hora
-  const handleServiceSelect = (service) => {
-    setSelectedService(service)
-    setStep(2)
+  // Avançar para seleção de data/hora (chamado quando serviços são selecionados)
+  const handleServicesSelect = (services) => {
+    setSelectedServices(services)
+    // Não avançar automaticamente - o usuário precisa clicar em continuar
+  }
+  
+  // Avançar para próximo passo quando houver serviços selecionados
+  const handleContinueToTimeSelection = () => {
+    if (selectedServices.length > 0) {
+      setStep(2)
+    }
   }
 
   // Avançar para formulário
@@ -104,7 +111,7 @@ const BookingWizard = () => {
   // Voltar para seleção de serviço
   const handleBackToService = () => {
     setStep(1)
-    setSelectedService(null)
+    // Manter serviços selecionados ao voltar
     setSelectedDate(null)
     setSelectedTime(null)
     setSelectedDateTime(null)
@@ -339,11 +346,24 @@ const BookingWizard = () => {
       {/* Conteúdo do wizard */}
       <div className="pb-6">
         {step === 1 && (
-          <ServiceSelection
-            tenantSlug={tenantSlug}
-            onSelectService={handleServiceSelect}
-            selectedService={selectedService}
-          />
+          <div>
+            <ServiceSelection
+              tenantSlug={tenantSlug}
+              onSelectServices={handleServicesSelect}
+              selectedServices={selectedServices}
+            />
+            {/* Botão para continuar quando houver serviços selecionados */}
+            {selectedServices.length > 0 && (
+              <div className="px-4 pb-4">
+                <button
+                  onClick={handleContinueToTimeSelection}
+                  className="w-full bg-primary text-white py-3 rounded-lg font-semibold hover:bg-primary-dark transition-colors"
+                >
+                  Continuar com {selectedServices.length} serviço{selectedServices.length > 1 ? 's' : ''}
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
         {step === 2 && (
@@ -359,7 +379,7 @@ const BookingWizard = () => {
             </button>
             <TimeSlotPicker
               tenantSlug={tenantSlug}
-              serviceId={selectedService?.id ? String(selectedService.id) : null}
+              serviceIds={selectedServices.map(s => s.id)}
               onSelectDateTime={handleDateTimeSelect}
               selectedDate={selectedDate}
               selectedTime={selectedTime}
@@ -380,7 +400,7 @@ const BookingWizard = () => {
             </button>
             <BookingForm
               tenantSlug={tenantSlug}
-              serviceId={selectedService?.id}
+              serviceIds={selectedServices.map(s => s.id)}
               selectedDateTime={selectedDateTime}
               onSuccess={handleSuccess}
               onBack={handleBackToTime}

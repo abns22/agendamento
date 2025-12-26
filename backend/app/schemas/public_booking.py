@@ -2,14 +2,15 @@
 Schemas Pydantic para endpoints públicos de agendamento.
 """
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 
 class AvailableSlotsResponse(BaseModel):
     """Schema de resposta para horários disponíveis."""
     tenant_slug: str = Field(..., description="Slug do tenant")
-    service_id: UUID = Field(..., description="ID do serviço")
+    service_id: Optional[UUID] = Field(None, description="ID do serviço (DEPRECATED: Use service_ids)")
+    service_ids: Optional[List[UUID]] = Field(None, description="IDs dos serviços")
     date: str = Field(..., description="Data no formato YYYY-MM-DD")
     available_slots: List[str] = Field(..., description="Lista de horários disponíveis no formato HH:MM")
     
@@ -17,7 +18,7 @@ class AvailableSlotsResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "tenant_slug": "estudio-bella",
-                "service_id": "123e4567-e89b-12d3-a456-426614174000",
+                "service_ids": ["123e4567-e89b-12d3-a456-426614174000"],
                 "date": "2024-01-15",
                 "available_slots": ["09:00", "09:15", "09:30", "10:00", "10:30"]
             }

@@ -270,26 +270,26 @@ const AgendaPage = () => {
   const handleOpenCheckout = async () => {
     if (!selectedAppointment) return
     
-    // Buscar serviço do agendamento se houver service_id
-    if (selectedAppointment.service_id) {
-      try {
-        // Garantir que service_id seja uma string válida
-        const serviceId = String(selectedAppointment.service_id)
-        if (!serviceId || serviceId === 'null' || serviceId === 'undefined') {
-          alert('Este agendamento não possui serviço associado.')
-          return
-        }
-        
-        const serviceResponse = await api.get(`/api/v1/admin/services/${serviceId}`)
-        setSelectedService(serviceResponse.data)
-        setIsCheckoutModalOpen(true)
-      } catch (err) {
-        console.error('Erro ao buscar serviço:', err)
-        const errorMessage = err.response?.data?.detail || err.message || 'Erro desconhecido'
-        alert(`Erro ao carregar dados do serviço: ${errorMessage}`)
-      }
-    } else {
+    // Buscar serviços do agendamento (múltiplos serviços suportados)
+    const serviceIds = selectedAppointment.service_ids || (selectedAppointment.service_id ? [selectedAppointment.service_id] : [])
+    
+    if (!serviceIds || serviceIds.length === 0) {
       alert('Este agendamento não possui serviço associado.')
+      return
+    }
+    
+    try {
+      // Buscar todos os serviços do agendamento
+      const servicesPromises = serviceIds.map(serviceId => 
+        api.get(`/api/v1/admin/services/${serviceId}`).then(res => res.data)
+      )
+      const servicesArray = await Promise.all(servicesPromises)
+      setSelectedService(servicesArray) // Agora é um array
+      setIsCheckoutModalOpen(true)
+    } catch (err) {
+      console.error('Erro ao buscar serviços:', err)
+      const errorMessage = err.response?.data?.detail || err.message || 'Erro desconhecido'
+      alert(`Erro ao carregar dados dos serviços: ${errorMessage}`)
     }
   }
 
@@ -605,7 +605,19 @@ const AgendaPage = () => {
                         {apt.customer_name || 'Cliente não informado'}
                       </h3>
                       <div className="space-y-2 text-sm">
-                        {apt.service_name && (
+                        {/* Exibir serviços - usar service_names se disponível, senão usar service_name (compatibilidade) */}
+                        {(apt.service_names && apt.service_names.length > 0) ? (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-lg">⚙️</span>
+                            <div className="flex flex-wrap gap-1">
+                              {apt.service_names.map((name, idx) => (
+                                <span key={idx} className="font-semibold text-gray-700">
+                                  {name}{idx < apt.service_names.length - 1 ? ',' : ''}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : apt.service_name && (
                           <div className="flex items-center gap-2">
                             <span className="text-lg">⚙️</span>
                             <span className="font-semibold text-gray-700">{apt.service_name}</span>
@@ -694,10 +706,19 @@ const AgendaPage = () => {
                 </>
               )}
               
-              {selectedAppointment.service_name && (
+              {/* Exibir serviços - usar service_names se disponível, senão usar service_name (compatibilidade) */}
+              {((selectedAppointment.service_names && selectedAppointment.service_names.length > 0) || selectedAppointment.service_name) && (
                 <div>
-                  <label className="text-sm font-semibold text-gray-600">Serviço</label>
-                  <p className="text-text">{selectedAppointment.service_name}</p>
+                  <label className="text-sm font-semibold text-gray-600">Serviço{selectedAppointment.service_names && selectedAppointment.service_names.length > 1 ? 's' : ''}</label>
+                  {selectedAppointment.service_names && selectedAppointment.service_names.length > 0 ? (
+                    <ul className="text-text list-disc list-inside">
+                      {selectedAppointment.service_names.map((name, idx) => (
+                        <li key={idx}>{name}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-text">{selectedAppointment.service_name}</p>
+                  )}
                 </div>
               )}
               
@@ -906,8 +927,14 @@ const AgendaPage = () => {
                 </label>
                 <div className="bg-gray-50 p-3 rounded-lg space-y-1 text-sm">
                   <p><span className="font-semibold">Cliente:</span> {selectedAppointment.customer_name || 'Não informado'}</p>
-                  {selectedAppointment.service_name && (
-                    <p><span className="font-semibold">Serviço:</span> {selectedAppointment.service_name}</p>
+                  {/* Exibir serviços - usar service_names se disponível, senão usar service_name (compatibilidade) */}
+                  {((selectedAppointment.service_names && selectedAppointment.service_names.length > 0) || selectedAppointment.service_name) && (
+                    <p>
+                      <span className="font-semibold">Serviço{selectedAppointment.service_names && selectedAppointment.service_names.length > 1 ? 's' : ''}:</span>{' '}
+                      {selectedAppointment.service_names && selectedAppointment.service_names.length > 0 
+                        ? selectedAppointment.service_names.join(', ')
+                        : selectedAppointment.service_name}
+                    </p>
                   )}
                   <p><span className="font-semibold">Horário:</span> {formatDateTime(selectedAppointment.start_datetime)}</p>
                 </div>

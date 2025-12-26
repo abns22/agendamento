@@ -11,17 +11,17 @@ import { TimePill, TimePillGrid } from '../../components/ui'
  * 
  * Exibe um seletor de data e lista de horários disponíveis como "pílulas" clicáveis.
  */
-const TimeSlotPicker = ({ tenantSlug, serviceId, onSelectDateTime, selectedDate, selectedTime }) => {
+const TimeSlotPicker = ({ tenantSlug, serviceIds, onSelectDateTime, selectedDate, selectedTime }) => {
   const [selectedDateState, setSelectedDateState] = useState(selectedDate || null)
   const { slots, loading, error, fetchSlots } = useAvailableSlots()
 
-  // Buscar slots quando data ou serviço mudar
+  // Buscar slots quando data ou serviços mudarem
   useEffect(() => {
-    if (tenantSlug && serviceId && selectedDateState) {
+    if (tenantSlug && serviceIds && serviceIds.length > 0 && selectedDateState) {
       const dateStr = format(selectedDateState, 'yyyy-MM-dd')
-      fetchSlots(tenantSlug, serviceId, dateStr)
+      fetchSlots(tenantSlug, serviceIds, dateStr)
     }
-  }, [tenantSlug, serviceId, selectedDateState])
+  }, [tenantSlug, serviceIds, selectedDateState, fetchSlots])
 
   // Filtrar datas passadas e definir data mínima (hoje)
   const minDate = new Date()

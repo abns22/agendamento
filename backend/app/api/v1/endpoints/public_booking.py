@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Path, BackgroundTa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from uuid import UUID
-from typing import Annotated, Optional
+from typing import Annotated, Optional, List
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -16,13 +16,16 @@ from app.core.database import get_db
 from app.models.tenant import Tenant
 from app.models.service import Service
 from app.models.appointment import Appointment, AppointmentStatus
+from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.services.availability_service import AvailabilityService
 from app.services.whatsapp_service import WhatsAppService
+from app.services.appointment_service import AppointmentService
 
 from app.schemas.public_booking import AvailableSlotsResponse
 from app.schemas.appointment import AppointmentCreate, AppointmentResponse
 from app.schemas.public_service import PublicServiceResponse
 from app.services.promotion_service import PromotionService
+import uuid
 
 router = APIRouter(prefix="/booking", tags=["Public Booking"])
 
@@ -65,11 +68,12 @@ async def get_tenant_by_slug(
     "/{tenant_slug}/slots",
     response_model=AvailableSlotsResponse,
     summary="Buscar horários disponíveis",
-    description="Retorna uma lista de horários disponíveis para agendamento de um serviço específico em uma data."
+    description="Retorna uma lista de horários disponíveis para agendamento de múltiplos serviços em uma data."
 )
 async def get_available_slots(
     tenant_slug: str = Path(..., description="Slug do tenant (ex: 'estudio-bella')"),
-    service_id: UUID = Query(..., description="UUID do serviço"),
+    service_ids: Optional[List[UUID]] = Query(None, description="Lista de UUIDs dos serviços"),
+    service_id: Optional[UUID] = Query(None, description="UUID do serviço (DEPRECATED: Use service_ids)"),
     date: str = Query(..., description="Data no formato YYYY-MM-DD", pattern=r'^\d{4}-\d{2}-\d{2}$'),
     db: AsyncSession = Depends(get_db)
 ):
@@ -77,59 +81,84 @@ async def get_available_slots(
     Busca horários disponíveis para agendamento.
     
     Esta rota é pública e permite que clientes vejam os horários disponíveis
-    para um serviço específico em uma data, identificando o estúdio pelo slug.
+    para múltiplos serviços em uma data, identificando o estúdio pelo slug.
     
     Fluxo:
-    1. Recebe o tenant_slug do path
+    1. Recebe o tenant_slug do path e lista de service_ids
     2. Busca o tenant_id correspondente ao slug
     3. Valida se o tenant existe e está ativo
-    4. Chama o AvailabilityService para calcular os slots disponíveis
-    5. Retorna a lista de horários disponíveis
+    4. Calcula a duração total dos serviços selecionados
+    5. Chama o AvailabilityService para calcular os slots disponíveis
+    6. Retorna a lista de horários disponíveis
     
     Args:
         tenant_slug: Slug único do tenant (ex: 'estudio-bella')
-        service_id: UUID do serviço a ser agendado
+        service_ids: Lista de UUIDs dos serviços a serem agendados
+        service_id: UUID único do serviço (DEPRECATED: Use service_ids para compatibilidade)
         date: Data no formato YYYY-MM-DD
         db: Sessão do banco de dados (injetada)
         
     Returns:
-        AvailableSlotsResponse: Objeto com tenant_slug, service_id, date e lista de slots
+        AvailableSlotsResponse: Objeto com tenant_slug, service_ids, date e lista de slots
         
     Raises:
         HTTPException 404: Se o tenant não for encontrado
-        HTTPException 400: Se a data for inválida ou o serviço não existir
+        HTTPException 400: Se a data for inválida ou os serviços não existirem
         HTTPException 500: Erro interno do servidor
     """
     try:
-        # Passo 1: Buscar tenant pelo slug
+        # Passo 1: Normalizar service_ids (compatibilidade com service_id único)
+        if not service_ids and service_id:
+            service_ids = [service_id]
+        
+        if not service_ids or len(service_ids) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="É necessário fornecer pelo menos um serviço (service_ids)"
+            )
+        
+        # Passo 2: Buscar tenant pelo slug
         tenant = await get_tenant_by_slug(tenant_slug, db)
         
-        # Passo 2: Chamar o AvailabilityService
-        # O serviço já valida se o service_id existe e pertence ao tenant
-        available_slots = await AvailabilityService.get_available_slots(
+        # Passo 3: Calcular duração total dos serviços
+        total_duration_minutes = await AppointmentService.calculate_total_duration(
             db_session=db,
             tenant_id=tenant.id,
-            service_id=service_id,
+            service_ids=service_ids
+        )
+        
+        if total_duration_minutes == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="A duração total dos serviços selecionados deve ser maior que zero."
+            )
+        
+        # Passo 4: Chamar o AvailabilityService com duração total
+        available_slots = await AvailabilityService.get_available_slots_with_duration(
+            db_session=db,
+            tenant_id=tenant.id,
+            total_duration_minutes=total_duration_minutes,
             date_str=date
         )
         
-        # Passo 3: Retornar resposta formatada
+        # Passo 5: Retornar resposta formatada
         return AvailableSlotsResponse(
             tenant_slug=tenant_slug,
-            service_id=service_id,
+            service_ids=service_ids,
+            service_id=service_ids[0] if service_ids else None,  # Para compatibilidade
             date=date,
             available_slots=available_slots
         )
         
+    except HTTPException:
+        # Re-raise HTTPExceptions
+        raise
     except ValueError as e:
-        # Erros de validação do AvailabilityService (data inválida, serviço não encontrado, etc)
+        # Erros de validação do AvailabilityService (data inválida, etc)
         raise HTTPException(
             status_code=400,
             detail=str(e)
         )
-    except HTTPException:
-        # Re-raise HTTPExceptions (como 404 do get_tenant_by_slug)
-        raise
     except Exception as e:
         # Erros inesperados
         raise HTTPException(
@@ -191,45 +220,61 @@ async def create_appointment(
         # - tenant.whatsapp_phone_id: ID do número WhatsApp Business na Meta API
         # - tenant.notification_phone_number: Número do estúdio para receber notificações
         
-        # Passo 2: Buscar serviço para validar e calcular duração
-        # IMPORTANTE: Converter service_id e tenant_id para strings (MySQL armazena UUIDs como String(36))
-        service_id_str = str(appointment_data.service_id) if appointment_data.service_id else None
+        # Passo 2: Obter lista de service_ids (já normalizada pelo schema)
+        service_ids = appointment_data.service_ids
+        if not service_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="É necessário fornecer pelo menos um serviço"
+            )
+        
         tenant_id_str = str(tenant.id) if tenant.id else None
-        
-        if not service_id_str or not tenant_id_str:
+        if not tenant_id_str:
             raise HTTPException(
                 status_code=400,
-                detail="service_id e tenant_id são obrigatórios"
+                detail="tenant_id inválido"
             )
         
-        service_query = select(Service).where(
-            and_(
-                Service.id == service_id_str,
-                Service.tenant_id == tenant_id_str
-            )
-        )
-        service_result = await db.execute(service_query)
-        service = service_result.scalar_one_or_none()
-        
-        if not service:
-            raise HTTPException(
-                status_code=400,
-                detail="Serviço não encontrado ou não pertence a este estúdio"
-            )
-        
-        # Passo 3: RE-VERIFICAÇÃO CRÍTICA (Prevenção de Concorrência)
-        # Garantir que o horário ainda está disponível antes de salvar
-        # Isso evita que dois clientes agendem o mesmo slot simultaneamente
-        start_datetime_utc = appointment_data.start_datetime
-        if start_datetime_utc.tzinfo is not None:
-            # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
-            start_datetime_utc = start_datetime_utc.replace(tzinfo=None)
-        
-        is_available = await AvailabilityService.is_slot_available(
+        # Passo 3: Validar e buscar serviços
+        services = await AppointmentService.get_services_by_ids(
             db_session=db,
             tenant_id=tenant.id,
-            service_id=appointment_data.service_id,
-            start_datetime=start_datetime_utc
+            service_ids=service_ids
+        )
+        
+        if not services:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhum serviço válido encontrado"
+            )
+        
+        # Passo 4: Calcular duração total e valor total
+        total_duration_minutes = await AppointmentService.calculate_total_duration(
+            db_session=db,
+            tenant_id=tenant.id,
+            service_ids=service_ids
+        )
+        
+        # Processar data/hora
+        start_datetime_utc = appointment_data.start_datetime
+        if start_datetime_utc.tzinfo is not None:
+            start_datetime_utc = start_datetime_utc.replace(tzinfo=None)
+        
+        # Calcular valor total com promoções
+        total_value = await AppointmentService.calculate_total_value(
+            db_session=db,
+            tenant_id=tenant.id,
+            service_ids=service_ids,
+            appointment_datetime=start_datetime_utc
+        )
+        
+        # Passo 5: RE-VERIFICAÇÃO CRÍTICA (Prevenção de Concorrência)
+        # Garantir que o horário ainda está disponível antes de salvar usando duração total
+        is_available = await AvailabilityService.is_slot_available_with_duration(
+            db_session=db,
+            tenant_id=tenant.id,
+            start_datetime=start_datetime_utc,
+            total_duration_minutes=total_duration_minutes
         )
         
         if not is_available:
@@ -238,36 +283,52 @@ async def create_appointment(
                 detail="Este horário não está mais disponível. Por favor, escolha outro horário."
             )
         
-        # Passo 4: Calcular end_datetime
-        end_datetime_utc = start_datetime_utc + timedelta(minutes=service.duration_minutes)
+        # Passo 6: Calcular end_datetime baseado na duração total
+        end_datetime_utc = AppointmentService.calculate_end_datetime(
+            start_datetime_utc,
+            total_duration_minutes
+        )
         
-        # Passo 5: Criar o Appointment no banco de dados
-        # IMPORTANTE: Converter UUIDs para strings (PostgreSQL armazena UUIDs como String(36))
-        tenant_id_str = str(tenant.id) if tenant.id else None
-        service_id_str = str(appointment_data.service_id) if appointment_data.service_id else None
-        
+        # Passo 7: Criar o Appointment no banco de dados
         new_appointment = Appointment(
             tenant_id=tenant_id_str,
-            service_id=service_id_str,
+            service_id=str(service_ids[0]) if service_ids else None,  # Para compatibilidade
             customer_name=appointment_data.customer_name,
             customer_phone=appointment_data.customer_phone,
             start_datetime=start_datetime_utc,
             end_datetime=end_datetime_utc,
-            status=AppointmentStatus.PENDING
+            status=AppointmentStatus.PENDING,
+            total_value=total_value  # Valor total agendado
         )
         
         db.add(new_appointment)
+        await db.flush()  # Flush para obter o ID do appointment
+        
+        # Passo 8: Criar registros na tabela intermediária appointment_services
+        for service_id in service_ids:
+            appointment_service = AppointmentServiceModel(
+                id=str(uuid.uuid4()),
+                appointment_id=new_appointment.id,
+                service_id=str(service_id)
+            )
+            db.add(appointment_service)
+        
         await db.commit()
         await db.refresh(new_appointment)
         
-        # Passo 6: DUPLO DISPARO ASSÍNCRONO - Notificações WhatsApp em Background
+        # Passo 9: DUPLO DISPARO ASSÍNCRONO - Notificações WhatsApp em Background
         # As notificações são enfileiradas para envio imediato, permitindo resposta 200 OK sem atrasos
         
         # Formatar data e hora para exibição (usado em ambas as notificações)
         formatted_datetime = start_datetime_utc.strftime("%d/%m/%Y às %H:%M")
         
+        # Obter nomes dos serviços para notificações
+        service_names = [s.name for s in services]
+        service_names_str = ", ".join(service_names)  # Para exibição em mensagens
+        
         # Tarefa 1: Notificar o CLIENTE sobre o agendamento
         # Usa template aprovado pela Meta (send_appointment_notification)
+        # Para múltiplos serviços, usar o primeiro nome ou uma lista formatada
         if tenant.whatsapp_phone_id:
             background_tasks.add_task(
                 send_whatsapp_notification_task,
@@ -276,7 +337,7 @@ async def create_appointment(
                 customer_phone=appointment_data.customer_phone,
                 customer_name=appointment_data.customer_name,
                 appointment_datetime=start_datetime_utc,
-                service_name=service.name
+                service_name=service_names_str  # Nome(s) dos serviços
             )
         
         # Tarefa 2: Notificar o ESTÚDIO sobre o novo agendamento
@@ -289,12 +350,26 @@ async def create_appointment(
                 tenant_phone_number=tenant.notification_phone_number,
                 customer_name=appointment_data.customer_name,
                 appointment_time=formatted_datetime,
-                service_name=service.name
+                service_name=service_names_str  # Nome(s) dos serviços
             )
         
-        # Passo 7: Retornar o agendamento criado com nome do serviço
+        # Passo 10: Carregar serviços relacionados e construir resposta
+        await db.refresh(new_appointment, ['services'])
+        
         apt_dict = AppointmentResponse.model_validate(new_appointment).model_dump()
-        apt_dict['service_name'] = service.name  # Já temos o objeto service
+        
+        # Informações para compatibilidade (primeiro serviço)
+        first_service = services[0]
+        apt_dict['service_name'] = first_service.name
+        apt_dict['service_display_color_code'] = first_service.display_color_code
+        apt_dict['service_id'] = first_service.id
+        
+        # Lista de serviços
+        apt_dict['service_ids'] = [str(s.id) for s in services]
+        apt_dict['service_names'] = service_names
+        apt_dict['service_display_color_codes'] = [s.display_color_code for s in services if s.display_color_code]
+        apt_dict['total_value'] = float(total_value)
+        
         return AppointmentResponse(**apt_dict)
         
     except HTTPException:

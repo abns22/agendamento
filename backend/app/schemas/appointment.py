@@ -1,18 +1,22 @@
 """
 Schemas Pydantic para a entidade Appointment (Agendamento).
 """
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from uuid import UUID
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
+from decimal import Decimal
 
 
 class AppointmentCreate(BaseModel):
     """Schema para criação de um novo agendamento."""
-    service_id: UUID = Field(..., description="UUID do serviço a ser agendado")
+    service_ids: Optional[List[UUID]] = Field(None, min_length=1, description="Lista de UUIDs dos serviços a serem agendados")
     customer_name: str = Field(..., min_length=2, max_length=200, description="Nome do cliente")
     customer_phone: str = Field(..., min_length=10, max_length=20, description="Telefone do cliente")
     start_datetime: datetime = Field(..., description="Data e hora de início do agendamento (UTC)")
+    
+    # Compatibilidade retroativa: aceitar service_id único também
+    service_id: Optional[UUID] = Field(None, description="DEPRECATED: Use service_ids. UUID único do serviço (para compatibilidade)")
     
     @field_validator('customer_phone')
     @classmethod
@@ -24,10 +28,21 @@ class AppointmentCreate(BaseModel):
             raise ValueError("Telefone deve conter pelo menos 10 dígitos")
         return phone_clean
     
+    @model_validator(mode='after')
+    def normalize_service_ids(self):
+        """Normaliza service_ids: se service_id único for fornecido, converte para lista."""
+        # Se service_ids não foi fornecido mas service_id foi, usar service_id
+        if not self.service_ids and self.service_id:
+            self.service_ids = [self.service_id]
+        # Validar que pelo menos um serviço foi fornecido
+        if not self.service_ids:
+            raise ValueError("É necessário fornecer service_ids ou service_id")
+        return self
+    
     class Config:
         json_schema_extra = {
             "example": {
-                "service_id": "123e4567-e89b-12d3-a456-426614174000",
+                "service_ids": ["123e4567-e89b-12d3-a456-426614174000"],
                 "customer_name": "Maria Silva",
                 "customer_phone": "11987654321",
                 "start_datetime": "2024-01-15T10:00:00Z"
@@ -37,10 +52,13 @@ class AppointmentCreate(BaseModel):
 
 class ManualAppointmentCreate(BaseModel):
     """Schema para criação de agendamento manual pelo administrador."""
-    service_id: UUID = Field(..., description="UUID do serviço a ser agendado")
+    service_ids: Optional[List[UUID]] = Field(None, min_length=1, description="Lista de UUIDs dos serviços a serem agendados")
     data_agendamento: datetime = Field(..., description="Data e hora de início do agendamento (UTC)")
     cliente_nome: str = Field(..., min_length=2, max_length=200, description="Nome do cliente")
     cliente_contato: str = Field(..., min_length=10, max_length=20, description="Contato (telefone ou e-mail) do cliente")
+    
+    # Compatibilidade retroativa: aceitar service_id único também
+    service_id: Optional[UUID] = Field(None, description="DEPRECATED: Use service_ids. UUID único do serviço (para compatibilidade)")
     
     @field_validator('cliente_contato')
     @classmethod
@@ -57,10 +75,21 @@ class ManualAppointmentCreate(BaseModel):
             raise ValueError("E-mail inválido ou telefone deve conter pelo menos 10 dígitos")
         return v.strip()
     
+    @model_validator(mode='after')
+    def normalize_service_ids(self):
+        """Normaliza service_ids: se service_id único for fornecido, converte para lista."""
+        # Se service_ids não foi fornecido mas service_id foi, usar service_id
+        if not self.service_ids and self.service_id:
+            self.service_ids = [self.service_id]
+        # Validar que pelo menos um serviço foi fornecido
+        if not self.service_ids:
+            raise ValueError("É necessário fornecer service_ids ou service_id")
+        return self
+    
     class Config:
         json_schema_extra = {
             "example": {
-                "service_id": "123e4567-e89b-12d3-a456-426614174000",
+                "service_ids": ["123e4567-e89b-12d3-a456-426614174000"],
                 "data_agendamento": "2024-01-15T10:00:00Z",
                 "cliente_nome": "João Silva",
                 "cliente_contato": "11987654321"
@@ -76,10 +105,23 @@ class AppointmentCancelRequest(BaseModel):
 class AppointmentRescheduleRequest(BaseModel):
     """Schema para reagendamento de um agendamento existente."""
     data_agendamento: datetime = Field(..., description="Nova data e hora de início do agendamento (UTC)")
+    service_ids: Optional[List[UUID]] = Field(
+        None,
+        min_length=1,
+        description="Nova lista de UUIDs dos serviços (opcional, usa os atuais se não for enviado)"
+    )
+    # Compatibilidade retroativa
     service_id: Optional[UUID] = Field(
         None,
-        description="Novo UUID do serviço (opcional, usa o atual se não for enviado)"
+        description="DEPRECATED: Use service_ids. Novo UUID único do serviço (opcional, para compatibilidade)"
     )
+    
+    @model_validator(mode='after')
+    def normalize_service_ids(self):
+        """Normaliza service_ids: se service_id único for fornecido, converte para lista."""
+        if not self.service_ids and self.service_id:
+            self.service_ids = [self.service_id]
+        return self
 
     class Config:
         json_schema_extra = {
@@ -94,9 +136,13 @@ class AppointmentResponse(BaseModel):
     """Schema de resposta para Appointment."""
     id: UUID
     tenant_id: UUID
-    service_id: Optional[UUID] = None  # Nullable para bloqueios
-    service_name: Optional[str] = None  # Nome do serviço (para exibição)
-    service_display_color_code: Optional[str] = None  # Cor de exibição do serviço na agenda
+    service_id: Optional[UUID] = None  # DEPRECATED: Use services. Mantido para compatibilidade
+    service_ids: Optional[List[UUID]] = None  # Lista de UUIDs dos serviços
+    service_name: Optional[str] = None  # Nome do primeiro serviço (para compatibilidade, DEPRECATED)
+    service_names: Optional[List[str]] = None  # Lista de nomes dos serviços
+    service_display_color_code: Optional[str] = None  # Cor do primeiro serviço (para compatibilidade)
+    service_display_color_codes: Optional[List[str]] = None  # Lista de cores dos serviços
+    total_value: Optional[Decimal] = None  # Valor total agendado (soma dos serviços com promoções)
     customer_name: Optional[str] = None  # Nullable para bloqueios
     customer_phone: Optional[str] = None  # Nullable para bloqueios
     start_datetime: datetime

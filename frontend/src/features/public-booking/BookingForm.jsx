@@ -26,7 +26,7 @@ const bookingSchema = z.object({
  */
 const BookingForm = ({ 
   tenantSlug, 
-  serviceId, 
+  serviceIds = [], // Array de IDs de serviços
   selectedDateTime, 
   onSuccess,
   onBack 
@@ -42,7 +42,7 @@ const BookingForm = ({
   })
 
   const onSubmit = async (data) => {
-    if (!selectedDateTime || !serviceId) {
+    if (!selectedDateTime || !serviceIds || serviceIds.length === 0) {
       return
     }
 
@@ -65,7 +65,7 @@ const BookingForm = ({
       const startDatetime = utcDate.toISOString()
 
       const appointmentData = {
-        service_id: serviceId,
+        service_ids: serviceIds, // Array de IDs de serviços
         customer_name: data.customer_name,
         customer_phone: data.customer_phone.replace(/\D/g, ''), // Remove caracteres não numéricos
         start_datetime: startDatetime,

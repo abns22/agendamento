@@ -97,20 +97,29 @@ class FinalizationService:
         if appointment.is_manual_block:
             raise ValueError("Não é possível finalizar um bloqueio manual")
         
-        # 2. Buscar serviço
-        if not appointment.service_id:
-            raise ValueError("Agendamento não possui serviço associado")
+        # 2. Calcular valor bruto (usando total_value do appointment ou calculando dos serviços)
+        # O appointment já tem total_value salvo no momento do agendamento (com promoções aplicadas)
+        await db_session.refresh(appointment, ['services'])
         
-        service_id_str = str(appointment.service_id)
-        service_query = select(Service).where(Service.id == service_id_str)
-        service_result = await db_session.execute(service_query)
-        service = service_result.scalar_one_or_none()
-        
-        if not service:
-            raise ValueError("Serviço não encontrado")
-        
-        # 3. Calcular valor bruto (aplicando promoção se ativa)
-        gross_value = Decimal(str(PromotionService.get_effective_price(service)))
+        if appointment.total_value:
+            gross_value = Decimal(str(appointment.total_value))
+        elif appointment.services:
+            # Calcular valor total somando os serviços (com promoções)
+            gross_value = Decimal('0.00')
+            for service in appointment.services:
+                effective_price = Decimal(str(PromotionService.get_effective_price(service)))
+                gross_value += effective_price
+        elif appointment.service_id:
+            # Fallback: dados antigos com serviço único
+            service_id_str = str(appointment.service_id)
+            service_query = select(Service).where(Service.id == service_id_str)
+            service_result = await db_session.execute(service_query)
+            service = service_result.scalar_one_or_none()
+            if not service:
+                raise ValueError("Serviço não encontrado")
+            gross_value = Decimal(str(PromotionService.get_effective_price(service)))
+        else:
+            raise ValueError("Agendamento não possui serviços associados")
         
         # 4. Aplicar desconto e validar
         discount_value = Decimal('0.00')
@@ -119,15 +128,26 @@ class FinalizationService:
             if discount_value < 0:
                 raise ValueError("Desconto não pode ser negativo")
             if discount_value > gross_value:
-                raise ValueError(f"Desconto ({discount_value}) não pode ser maior que o valor bruto do serviço ({gross_value})")
+                raise ValueError(f"Desconto ({discount_value}) não pode ser maior que o valor bruto total ({gross_value})")
         
         # Calcular valor final após desconto (usado para cálculos de taxas e validações)
         final_value_after_discount = gross_value - discount_value
         
-        # 5. Calcular custo total
+        # 5. Calcular custo total (soma dos custos fixos de todos os serviços)
         total_cost = Decimal('0.00')
-        if service.fixed_cost_value:
-            total_cost = Decimal(str(service.fixed_cost_value))
+        await db_session.refresh(appointment, ['services'])
+        if appointment.services:
+            for service in appointment.services:
+                if service.fixed_cost_value:
+                    total_cost += Decimal(str(service.fixed_cost_value))
+        elif appointment.service_id:
+            # Fallback: dados antigos com serviço único
+            service_id_str = str(appointment.service_id)
+            service_query = select(Service).where(Service.id == service_id_str)
+            service_result = await db_session.execute(service_query)
+            service = service_result.scalar_one_or_none()
+            if service and service.fixed_cost_value:
+                total_cost = Decimal(str(service.fixed_cost_value))
         
         if additional_cost:
             total_cost += additional_cost

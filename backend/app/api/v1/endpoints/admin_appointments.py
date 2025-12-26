@@ -6,14 +6,18 @@ Permite que administradores visualizem e gerenciem agendamentos de clientes.
 from fastapi import APIRouter, HTTPException, Depends, Path, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
+from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta, date
+from decimal import Decimal
+import uuid
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_active_tenant
 from app.models.tenant import Tenant
 from app.models.appointment import Appointment, AppointmentStatus
+from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.service import Service
 from app.models.payment_entry import PaymentEntry
 from app.models.schedule_config import ScheduleConfig
@@ -28,10 +32,76 @@ from app.schemas.transaction import FinalizeAppointmentRequest, FinalizeAppointm
 from app.services.finalization_service import FinalizationService
 from app.services.whatsapp_service import WhatsAppService
 from app.services.availability_service import AvailabilityService
+from app.services.appointment_service import AppointmentService
 from pydantic import BaseModel
 from datetime import timedelta
 
 router = APIRouter(prefix="/admin/appointments", tags=["Admin - Appointments"])
+
+
+async def build_appointment_response(
+    appointment: Appointment,
+    db: AsyncSession
+) -> AppointmentResponse:
+    """
+    Constrói AppointmentResponse com informações dos serviços relacionados.
+    
+    Args:
+        appointment: Objeto Appointment
+        db: Sessão do banco de dados
+        
+    Returns:
+        AppointmentResponse: Response com informações dos serviços
+    """
+    # Carregar serviços relacionados (lazy="selectin" no modelo já carrega automaticamente, mas refresh garante)
+    await db.refresh(appointment, ['services'])
+    
+    apt_dict = AppointmentResponse.model_validate(appointment).model_dump()
+    
+    # Se houver serviços na relação Many-to-Many
+    if appointment.services:
+        services = list(appointment.services)
+        apt_dict['service_ids'] = [str(s.id) for s in services]
+        apt_dict['service_names'] = [s.name for s in services]
+        apt_dict['service_display_color_codes'] = [s.display_color_code for s in services if s.display_color_code]
+        
+        # Para compatibilidade, usar primeiro serviço
+        first_service = services[0]
+        apt_dict['service_name'] = first_service.name
+        apt_dict['service_display_color_code'] = first_service.display_color_code
+        apt_dict['service_id'] = first_service.id
+    # Se não houver serviços na relação mas tiver service_id (dados antigos)
+    elif appointment.service_id:
+        service_id_str = str(appointment.service_id)
+        service_query = select(Service).where(Service.id == service_id_str)
+        service_result = await db.execute(service_query)
+        service = service_result.scalar_one_or_none()
+        if service:
+            apt_dict['service_id'] = service.id
+            apt_dict['service_name'] = service.name
+            apt_dict['service_display_color_code'] = service.display_color_code
+            apt_dict['service_ids'] = [str(service.id)]
+            apt_dict['service_names'] = [service.name]
+            apt_dict['service_display_color_codes'] = [service.display_color_code] if service.display_color_code else []
+        else:
+            apt_dict['service_name'] = None
+            apt_dict['service_display_color_code'] = None
+            apt_dict['service_ids'] = []
+            apt_dict['service_names'] = []
+            apt_dict['service_display_color_codes'] = []
+    else:
+        # Bloqueio manual sem serviços
+        apt_dict['service_name'] = None
+        apt_dict['service_display_color_code'] = None
+        apt_dict['service_ids'] = []
+        apt_dict['service_names'] = []
+        apt_dict['service_display_color_codes'] = []
+    
+    # Adicionar total_value se disponível
+    if appointment.total_value:
+        apt_dict['total_value'] = float(appointment.total_value)
+    
+    return AppointmentResponse(**apt_dict)
 
 
 @router.get(
@@ -297,28 +367,11 @@ async def list_appointments(
     result = await db.execute(query)
     appointments = result.scalars().all()
     
-    # Buscar nomes dos serviços para cada agendamento
+    # Construir responses com informações dos serviços
     appointment_responses = []
     for apt in appointments:
-        apt_dict = AppointmentResponse.model_validate(apt).model_dump()
-        
-        # Se tiver service_id, buscar o nome e display_color_code do serviço
-        if apt.service_id:
-            service_id_str = str(apt.service_id)
-            service_query = select(Service).where(Service.id == service_id_str)
-            service_result = await db.execute(service_query)
-            service = service_result.scalar_one_or_none()
-            if service:
-                apt_dict['service_name'] = service.name
-                apt_dict['service_display_color_code'] = service.display_color_code
-            else:
-                apt_dict['service_name'] = None
-                apt_dict['service_display_color_code'] = None
-        else:
-            apt_dict['service_name'] = None
-            apt_dict['service_display_color_code'] = None
-        
-        appointment_responses.append(AppointmentResponse(**apt_dict))
+        response = await build_appointment_response(apt, db)
+        appointment_responses.append(response)
     
     return appointment_responses
 
@@ -368,7 +421,7 @@ async def get_appointment(
             detail="Agendamento não encontrado"
         )
     
-    return AppointmentResponse.model_validate(appointment)
+    return await build_appointment_response(appointment, db)
 
 
 @router.put(
@@ -433,21 +486,7 @@ async def update_appointment(
     await db.commit()
     await db.refresh(appointment)
     
-    # Buscar nome do serviço se existir
-    apt_dict = AppointmentResponse.model_validate(appointment).model_dump()
-    if appointment.service_id:
-        service_id_str = str(appointment.service_id)
-        service_query = select(Service).where(Service.id == service_id_str)
-        service_result = await db.execute(service_query)
-        service = service_result.scalar_one_or_none()
-        if service:
-            apt_dict['service_name'] = service.name
-        else:
-            apt_dict['service_name'] = None
-    else:
-        apt_dict['service_name'] = None
-    
-    return AppointmentResponse(**apt_dict)
+    return await build_appointment_response(appointment, db)
 
 
 @router.post(
@@ -796,38 +835,46 @@ async def reschedule_appointment(
                 detail="Não é possível reagendar um agendamento já finalizado"
             )
 
-        # Determinar serviço (novo ou atual)
-        new_service_id = reschedule_data.service_id or appointment.service_id
-        if not new_service_id:
+        # Carregar serviços atuais do agendamento
+        await db.refresh(appointment, ['services'])
+        current_service_ids = [str(s.id) for s in appointment.services] if appointment.services else []
+        
+        # Determinar serviços (novos ou atuais)
+        if reschedule_data.service_ids:
+            new_service_ids = [str(sid) for sid in reschedule_data.service_ids]
+        elif current_service_ids:
+            new_service_ids = current_service_ids
+        else:
             raise HTTPException(
                 status_code=400,
-                detail="service_id é obrigatório para reagendamento"
+                detail="service_ids são obrigatórios para reagendamento"
             )
-
-        service_id_str = str(new_service_id)
-
-        service_query = select(Service).where(
-            and_(
-                Service.id == service_id_str,
-                Service.tenant_id == tenant_id_str
-            )
+        
+        # Calcular duração total dos novos serviços
+        total_duration_minutes = await AppointmentService.calculate_total_duration(
+            db_session=db,
+            tenant_id=tenant.id,
+            service_ids=[UUID(sid) for sid in new_service_ids]
         )
-        service_result = await db.execute(service_query)
-        service = service_result.scalar_one_or_none()
-
-        if not service:
-            raise HTTPException(
-                status_code=400,
-                detail="Serviço não encontrado ou não pertence a este tenant"
-            )
-
+        
         # Processar nova data/hora (confiar que está em UTC)
         start_datetime_utc = reschedule_data.data_agendamento
         if start_datetime_utc.tzinfo is not None:
             start_datetime_utc = start_datetime_utc.replace(tzinfo=None)
 
-        # Calcular novo horário de fim
-        end_datetime_utc = start_datetime_utc + timedelta(minutes=service.duration_minutes)
+        # Calcular novo horário de fim baseado na duração total
+        end_datetime_utc = AppointmentService.calculate_end_datetime(
+            start_datetime_utc,
+            total_duration_minutes
+        )
+        
+        # Calcular valor total (atualizado com promoções na nova data)
+        total_value = await AppointmentService.calculate_total_value(
+            db_session=db,
+            tenant_id=tenant.id,
+            service_ids=[UUID(sid) for sid in new_service_ids],
+            appointment_datetime=start_datetime_utc
+        )
 
         # Validar horário de funcionamento (similar ao AvailabilityService.is_slot_available)
         target_date = start_datetime_utc.date()
@@ -865,7 +912,15 @@ async def reschedule_appointment(
                 detail="Horário fora do horário de funcionamento do estúdio"
             )
 
-        # Verificar sobreposição com outros agendamentos, ignorando o próprio agendamento
+        # Verificar disponibilidade usando AvailabilityService
+        is_available = await AvailabilityService.is_slot_available_with_duration(
+            db_session=db,
+            tenant_id=tenant.id,
+            start_datetime=start_datetime_utc,
+            total_duration_minutes=total_duration_minutes
+        )
+        
+        # Mas também verificar manualmente excluindo o próprio agendamento
         conflicts_query = select(Appointment).where(
             and_(
                 Appointment.tenant_id == tenant_id_str,
@@ -887,17 +942,32 @@ async def reschedule_appointment(
         # Atualizar agendamento
         appointment.start_datetime = start_datetime_utc
         appointment.end_datetime = end_datetime_utc
-        appointment.service_id = service_id_str
+        appointment.total_value = total_value
+        
+        # Atualizar service_id para compatibilidade (primeiro serviço)
+        if new_service_ids:
+            appointment.service_id = new_service_ids[0]
+        
+        # Remover serviços antigos da tabela intermediária
+        from sqlalchemy import delete as sql_delete
+        delete_stmt = sql_delete(AppointmentServiceModel).where(
+            AppointmentServiceModel.appointment_id == appointment_id_str
+        )
+        await db.execute(delete_stmt)
+        
+        # Adicionar novos serviços na tabela intermediária
+        for service_id_str in new_service_ids:
+            appointment_service = AppointmentServiceModel(
+                id=str(uuid.uuid4()),
+                appointment_id=appointment_id_str,
+                service_id=service_id_str
+            )
+            db.add(appointment_service)
 
         await db.commit()
         await db.refresh(appointment)
 
-        # Montar resposta com nome e cor do serviço
-        apt_dict = AppointmentResponse.model_validate(appointment).model_dump()
-        apt_dict["service_name"] = service.name
-        apt_dict["service_display_color_code"] = getattr(service, "display_color_code", None)
-
-        return AppointmentResponse(**apt_dict)
+        return await build_appointment_response(appointment, db)
 
     except HTTPException:
         raise
@@ -956,42 +1026,48 @@ async def create_manual_appointment(
                 detail="tenant_id inválido"
             )
         
-        # Passo 2: Buscar serviço para validar e calcular duração
-        service_id_str = str(appointment_data.service_id) if appointment_data.service_id else None
-        if not service_id_str:
+        # Passo 2: Obter lista de service_ids (já normalizada pelo schema)
+        service_ids = appointment_data.service_ids
+        if not service_ids:
             raise HTTPException(
                 status_code=400,
-                detail="service_id é obrigatório"
+                detail="É necessário fornecer pelo menos um serviço"
             )
         
-        service_query = select(Service).where(
-            and_(
-                Service.id == service_id_str,
-                Service.tenant_id == tenant_id_str
-            )
+        # Passo 3: Calcular duração total e valor total
+        total_duration_minutes = await AppointmentService.calculate_total_duration(
+            db_session=db,
+            tenant_id=tenant.id,
+            service_ids=service_ids
         )
-        service_result = await db.execute(service_query)
-        service = service_result.scalar_one_or_none()
         
-        if not service:
-            raise HTTPException(
-                status_code=400,
-                detail="Serviço não encontrado ou não pertence a este tenant"
-            )
-        
-        # Passo 3: Processar data_agendamento (confiar que está em UTC)
+        # Passo 4: Processar data_agendamento (confiar que está em UTC)
         start_datetime_utc = appointment_data.data_agendamento
         
         # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
         if start_datetime_utc.tzinfo is not None:
             start_datetime_utc = start_datetime_utc.replace(tzinfo=None)
         
-        # Passo 4: Verificar disponibilidade do slot
-        is_available = await AvailabilityService.is_slot_available(
+        # Calcular valor total com promoções
+        total_value = await AppointmentService.calculate_total_value(
             db_session=db,
             tenant_id=tenant.id,
-            service_id=appointment_data.service_id,
-            start_datetime=start_datetime_utc
+            service_ids=service_ids,
+            appointment_datetime=start_datetime_utc
+        )
+        
+        # Passo 5: Calcular end_datetime baseado na duração total
+        end_datetime_utc = AppointmentService.calculate_end_datetime(
+            start_datetime_utc,
+            total_duration_minutes
+        )
+        
+        # Passo 6: Verificar disponibilidade do slot usando a duração total
+        is_available = await AvailabilityService.is_slot_available_with_duration(
+            db_session=db,
+            tenant_id=tenant.id,
+            start_datetime=start_datetime_utc,
+            total_duration_minutes=total_duration_minutes
         )
         
         if not is_available:
@@ -1000,30 +1076,60 @@ async def create_manual_appointment(
                 detail="Este horário não está disponível. Por favor, escolha outro horário."
             )
         
-        # Passo 5: Calcular end_datetime
-        end_datetime_utc = start_datetime_utc + timedelta(minutes=service.duration_minutes)
+        # Passo 7: Buscar serviços para obter informações de exibição
+        services = await AppointmentService.get_services_by_ids(
+            db_session=db,
+            tenant_id=tenant.id,
+            service_ids=service_ids
+        )
         
-        # Passo 6: Criar o Appointment no banco de dados
+        # Passo 8: Criar o Appointment no banco de dados
         # IMPORTANTE: Converter UUIDs para strings (PostgreSQL armazena UUIDs como String(36))
         new_appointment = Appointment(
             tenant_id=tenant_id_str,
-            service_id=service_id_str,
+            service_id=str(service_ids[0]) if service_ids else None,  # Mantido para compatibilidade
             customer_name=appointment_data.cliente_nome,
             customer_phone=appointment_data.cliente_contato,
             start_datetime=start_datetime_utc,
             end_datetime=end_datetime_utc,
             status=AppointmentStatus.SCHEDULED,
-            description="Manual"  # Marca origem como "Manual"
+            description="Manual",  # Marca origem como "Manual"
+            total_value=total_value  # Valor total agendado
         )
         
         db.add(new_appointment)
+        await db.flush()  # Flush para obter o ID do appointment
+        
+        # Passo 9: Criar registros na tabela intermediária appointment_services
+        for service_id in service_ids:
+            appointment_service = AppointmentServiceModel(
+                id=str(uuid.uuid4()),
+                appointment_id=new_appointment.id,
+                service_id=str(service_id)
+            )
+            db.add(appointment_service)
+        
         await db.commit()
         await db.refresh(new_appointment)
         
-        # Passo 7: Retornar o agendamento criado com nome do serviço
+        # Passo 10: Carregar serviços relacionamentos
+        await db.refresh(new_appointment, ['services'])
+        
+        # Passo 11: Construir resposta com informações dos serviços
         apt_dict = AppointmentResponse.model_validate(new_appointment).model_dump()
-        apt_dict['service_name'] = service.name
-        apt_dict['service_display_color_code'] = service.display_color_code
+        
+        # Informações para compatibilidade (primeiro serviço)
+        if services:
+            first_service = services[0]
+            apt_dict['service_name'] = first_service.name
+            apt_dict['service_display_color_code'] = first_service.display_color_code
+            apt_dict['service_id'] = first_service.id  # Para compatibilidade
+        
+        # Lista de serviços
+        apt_dict['service_ids'] = [str(s.id) for s in services]
+        apt_dict['service_names'] = [s.name for s in services]
+        apt_dict['service_display_color_codes'] = [s.display_color_code for s in services if s.display_color_code]
+        apt_dict['total_value'] = float(total_value)
         
         return AppointmentResponse(**apt_dict)
         

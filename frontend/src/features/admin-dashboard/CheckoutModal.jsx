@@ -15,6 +15,8 @@ import { ptBR } from 'date-fns/locale'
  * - Adicionar custo adicional opcional
  */
 const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => {
+  // service pode ser um único serviço ou um array de serviços
+  const services = Array.isArray(service) ? service : (service ? [service] : [])
   const [paymentMethods, setPaymentMethods] = useState([])
   const [isLoadingMethods, setIsLoadingMethods] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -38,32 +40,20 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     }
   }, [isOpen, appointment])
   
-  // Recalcular valor quando o serviço mudar
+  // Recalcular valor quando os serviços mudarem
   useEffect(() => {
-    if (isOpen && service) {
+    if (isOpen && services.length > 0) {
       calculateGrossValue()
       // Inicializar valueDue como vazio quando pagamento é à vista
       // Só será preenchido se o usuário marcar como "a prazo"
       if (!isPaid) {
-        const now = new Date()
-        let value = parseFloat(service.price)
-        if (service.is_promotional && service.promotion_start_date && service.promotion_end_date && service.promotional_value) {
-          const startDate = new Date(service.promotion_start_date)
-          const endDate = new Date(service.promotion_end_date)
-          // Comparar timestamps para evitar problemas de timezone
-          const nowTime = now.getTime()
-          const startTime = startDate.getTime()
-          const endTime = endDate.getTime()
-          if (nowTime >= startTime && nowTime <= endTime) {
-            value = parseFloat(service.promotional_value)
-          }
-        }
-        setValueDue(value.toFixed(2))
+        const totalValue = calculateTotalValueFromServices()
+        setValueDue(totalValue.toFixed(2))
       } else {
         setValueDue('')
       }
     }
-  }, [isOpen, service, isPaid])
+  }, [isOpen, services, isPaid])
   
   // Limpar valueDue quando pagamento for marcado como à vista
   useEffect(() => {
@@ -88,23 +78,8 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     }
   }
   
-  const calculateGrossValue = () => {
-    if (!service) {
-      console.log('calculateGrossValue: serviço não disponível')
-      return
-    }
-    
-    console.log('calculateGrossValue: serviço recebido', {
-      price: service.price,
-      is_promotional: service.is_promotional,
-      promotion_start_date: service.promotion_start_date,
-      promotion_end_date: service.promotion_end_date,
-      promotional_value: service.promotional_value
-    })
-    
-    // Verificar se há promoção ativa
-    // O backend usa PromotionService.get_effective_price() que verifica se a promoção está ativa
-    // Replicar a mesma lógica: verificar se is_promotional é true e se a data atual está dentro do intervalo
+  // Calcular valor efetivo de um serviço (com promoção se ativa)
+  const getServiceEffectivePrice = (service) => {
     let value = parseFloat(service.price)
     
     if (service.is_promotional && service.promotion_start_date && service.promotion_end_date && service.promotional_value) {
@@ -113,47 +88,44 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
         const startDate = new Date(service.promotion_start_date)
         const endDate = new Date(service.promotion_end_date)
         
-        // O backend salva datas sem timezone (timezone-naive) e assume UTC ao comparar
-        // Para comparar corretamente no frontend, vamos usar timestamps
-        // Isso evita problemas de timezone entre cliente e servidor
         const nowTime = now.getTime()
         const startTime = startDate.getTime()
         const endTime = endDate.getTime()
         
-        console.log('Verificando promoção:', {
-          now: now.toISOString(),
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString(),
-          nowTime,
-          startTime,
-          endTime,
-          isActive: nowTime >= startTime && nowTime <= endTime
-        })
-        
-        // Verificar se a promoção está ativa (agora está entre início e fim, incluindo os limites)
+        // Verificar se a promoção está ativa
         if (nowTime >= startTime && nowTime <= endTime) {
           value = parseFloat(service.promotional_value)
-          console.log('Promoção ativa! Usando valor promocional:', value)
-        } else {
-          console.log('Promoção não está ativa. Usando valor normal:', value)
         }
       } catch (error) {
         console.error('Erro ao verificar promoção:', error)
-        // Em caso de erro, usar o valor normal
         value = parseFloat(service.price)
       }
-    } else {
-      console.log('Serviço não tem promoção ou dados incompletos')
     }
     
-    console.log('Valor final calculado:', value)
-    setGrossValue(value)
+    return value
+  }
+  
+  // Calcular valor total de todos os serviços
+  const calculateTotalValueFromServices = () => {
+    if (services.length === 0) return 0
+    return services.reduce((sum, s) => sum + getServiceEffectivePrice(s), 0)
+  }
+  
+  const calculateGrossValue = () => {
+    if (services.length === 0) {
+      console.log('calculateGrossValue: nenhum serviço disponível')
+      return
+    }
+    
+    const totalValue = calculateTotalValueFromServices()
+    console.log('Valor total calculado (múltiplos serviços):', totalValue)
+    setGrossValue(totalValue)
     
     // Inicializar com uma entrada de pagamento vazia
     if (paymentEntries.length === 0) {
       setPaymentEntries([{
         payment_method_id: '',
-        value_paid: value.toFixed(2),
+        value_paid: totalValue.toFixed(2),
         installments: 1
       }])
     }
@@ -313,6 +285,45 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
           </div>
         )}
         
+        {/* Lista de Serviços com Sub-totais */}
+        {services.length > 0 && (
+          <div className="bg-gray-50 p-4 rounded-lg space-y-2 mb-4">
+            <label className="block text-sm font-semibold text-gray-700 mb-3">
+              Serviços do Agendamento
+            </label>
+            {services.map((service, index) => {
+              const effectivePrice = getServiceEffectivePrice(service)
+              const originalPrice = parseFloat(service.price)
+              const hasPromo = service.is_promotional && 
+                             service.promotion_start_date && 
+                             service.promotion_end_date && 
+                             service.promotional_value &&
+                             effectivePrice < originalPrice
+              
+              return (
+                <div key={service.id || index} className="flex justify-between items-start py-2 border-b border-gray-200 last:border-b-0">
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-gray-800">{service.name}</p>
+                    {hasPromo && (
+                      <div className="text-xs text-gray-600 mt-1">
+                        <span className="line-through">{formatCurrency(originalPrice)}</span>
+                        <span className="ml-2 text-red-600 font-semibold">
+                          Promoção: {formatCurrency(effectivePrice)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right ml-4">
+                    <p className="text-sm font-bold text-primary">
+                      {formatCurrency(effectivePrice)}
+                    </p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        
         {/* Valor Total */}
         <div className="bg-gray-50 p-4 rounded-lg space-y-3">
           <div className="flex justify-between items-center">
@@ -321,14 +332,6 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
               {formatCurrency(grossValue)}
             </span>
           </div>
-          {service.is_promotional && service.promotional_value && (
-            <div className="text-xs text-gray-600">
-              <span className="line-through">{formatCurrency(parseFloat(service.price))}</span>
-              <span className="ml-2 text-red-600 font-semibold">
-                Promoção: {formatCurrency(parseFloat(service.promotional_value))}
-              </span>
-            </div>
-          )}
           
           {/* Campo de Desconto */}
           <div>

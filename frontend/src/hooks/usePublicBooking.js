@@ -53,9 +53,12 @@ export const useAvailableSlots = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const fetchSlots = async (tenantSlug, serviceId, date) => {
-    if (!tenantSlug || !serviceId || !date) {
-      console.warn('⚠️ useAvailableSlots: Parâmetros incompletos', { tenantSlug, serviceId, date })
+  const fetchSlots = async (tenantSlug, serviceIds, date) => {
+    // serviceIds pode ser um único ID ou um array de IDs
+    const ids = Array.isArray(serviceIds) ? serviceIds : [serviceIds]
+    
+    if (!tenantSlug || !ids || ids.length === 0 || !date) {
+      console.warn('⚠️ useAvailableSlots: Parâmetros incompletos', { tenantSlug, serviceIds: ids, date })
       setSlots([])
       return
     }
@@ -66,7 +69,7 @@ export const useAvailableSlots = () => {
     try {
       const url = `/api/v1/booking/${tenantSlug}/slots`
       const params = {
-        service_id: serviceId,
+        service_ids: ids,  // Enviar como array
         date: date,
       }
       console.log('📡 useAvailableSlots: Fazendo requisição para:', url, params)
@@ -80,7 +83,7 @@ export const useAvailableSlots = () => {
         status: err.response?.status,
         detail: err.response?.data?.detail,
         tenantSlug,
-        serviceId,
+        serviceIds: ids,
         date
       })
       setError(errorMessage)

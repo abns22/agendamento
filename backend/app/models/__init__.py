@@ -4,6 +4,7 @@ from app.models.service import Service
 from app.models.schedule_config import ScheduleConfig
 from app.models.stop_time import StopTime
 from app.models.appointment import Appointment, AppointmentStatus
+from app.models.appointment_service import AppointmentService
 from app.models.user import User, UserRole
 from app.models.payment_method_config import PaymentMethodConfig
 from app.models.payment_installment_config import PaymentInstallmentConfig, TaxType
@@ -23,6 +24,7 @@ __all__ = [
     "StopTime",
     "Appointment",
     "AppointmentStatus",
+    "AppointmentService",
     "User",
     "UserRole",
     "PaymentMethodConfig",
