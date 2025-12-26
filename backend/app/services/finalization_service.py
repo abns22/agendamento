@@ -214,11 +214,13 @@ class FinalizationService:
         total_profit = net_value - total_cost
         
         # 8. Criar Transaction
-        # Usar datetime.utcnow() (timezone-naive) para consistência com o modelo Transaction
+        # Usar datetime.now() (timezone-naive, horário local) para que a data do pagamento
+        # seja registrada no dia correto conforme o timezone local do servidor
+        # Isso garante que pagamentos feitos no dia 25 apareçam no caixa do dia 25
         new_transaction = Transaction(
             tenant_id=tenant_id_str,
             appointment_id=appointment_id_str,
-            date_time=datetime.utcnow(),
+            date_time=datetime.now(),
             gross_value=gross_value,  # Valor bruto original (para histórico)
             discount=discount_value,  # Valor do desconto aplicado
             net_value=net_value,  # Valor líquido (após desconto e taxas)
