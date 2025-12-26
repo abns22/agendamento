@@ -1,0 +1,20 @@
+error during build:
+[vite:esbuild] Transform failed with 1 error:
+/opt/render/project/src/frontend/src/features/public-booking/ServiceSelection.jsx:393:0: ERROR: Unexpected end of file before a closing "div" tag
+file: /opt/render/project/src/frontend/src/features/public-booking/ServiceSelection.jsx:393:0
+Unexpected end of file before a closing "div" tag
+391|  export default ServiceSelection
+392|  
+393|  
+   |  ^
+    at failureErrorWithLog (/opt/render/project/src/frontend/node_modules/esbuild/lib/main.js:1472:15)
+    at /opt/render/project/src/frontend/node_modules/esbuild/lib/main.js:755:50
+    at responseCallbacks.<computed> (/opt/render/project/src/frontend/node_modules/esbuild/lib/main.js:622:9)
+    at handleIncomingPacket (/opt/render/project/src/frontend/node_modules/esbuild/lib/main.js:677:12)
+    at Socket.readFromStdout (/opt/render/project/src/frontend/node_modules/esbuild/lib/main.js:600:7)
+    at Socket.emit (node:events:518:28)
+    at addChunk (node:internal/streams/readable:561:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+    at Readable.push (node:internal/streams/readable:392:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23)
+==> Build failed 😞

@@ -384,6 +384,7 @@ const ServiceSelection = ({ tenantSlug, onSelectServices, selectedServices = [] 
           </div>
         )}
       </Modal>
+      </div>
     </div>
   )
 }
