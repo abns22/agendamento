@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from './AuthProvider'
 import { Card, Modal, Button, Input } from '../../components/ui'
-import { api } from '../../utils/api'
+import { api, formatCurrency } from '../../utils/api'
 import ClientQuickRegisterModal from './ClientQuickRegisterModal'
 import BirthdaysSection from './BirthdaysSection'
 
@@ -18,7 +18,19 @@ const DashboardPage = () => {
     active_services: 0,
     pending_appointments: 0
   })
+  const [summary, setSummary] = useState({
+    faturamento_total: 0,
+    ticket_medio: 0,
+    servico_mais_procurado_id: null,
+    total_descontos: 0,
+    total_appointments_finalizados: 0,
+    periodo_inicio: null,
+    periodo_fim: null
+  })
+  const [mostPopularServiceName, setMostPopularServiceName] = useState(null)
+  const [birthdaysCount, setBirthdaysCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingSummary, setIsLoadingSummary] = useState(true)
   const [error, setError] = useState(null)
   const [isClientModalOpen, setIsClientModalOpen] = useState(false)
 
@@ -41,6 +53,47 @@ const DashboardPage = () => {
     fetchStats()
   }, [])
 
+  // Buscar resumo financeiro do dashboard
+  useEffect(() => {
+    const fetchSummary = async () => {
+      try {
+        setIsLoadingSummary(true)
+        const response = await api.get('/api/v1/admin/dashboard/summary')
+        setSummary(response.data)
+        
+        // Buscar nome do serviço mais procurado se houver ID
+        if (response.data.servico_mais_procurado_id) {
+          try {
+            const serviceResponse = await api.get(`/api/v1/admin/services/${response.data.servico_mais_procurado_id}`)
+            setMostPopularServiceName(serviceResponse.data.name)
+          } catch (err) {
+            console.error('Erro ao buscar nome do serviço:', err)
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao carregar resumo financeiro:', err)
+      } finally {
+        setIsLoadingSummary(false)
+      }
+    }
+
+    fetchSummary()
+  }, [])
+
+  // Buscar contagem de aniversariantes
+  useEffect(() => {
+    const fetchBirthdaysCount = async () => {
+      try {
+        const response = await api.get('/api/v1/admin/reports/birthdays')
+        setBirthdaysCount(response.data?.length || 0)
+      } catch (err) {
+        console.error('Erro ao carregar aniversariantes:', err)
+      }
+    }
+
+    fetchBirthdaysCount()
+  }, [])
+
   return (
     <div className="space-y-6">
       {/* Título da Página */}
@@ -51,7 +104,86 @@ const DashboardPage = () => {
         </p>
       </div>
 
-      {/* Cards de Resumo */}
+      {/* Cards de Indicadores Financeiros */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card: Faturamento */}
+        <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600 font-medium">Faturamento (mês)</p>
+              <p className="text-2xl font-bold text-green-700 mt-1">
+                {isLoadingSummary ? '...' : formatCurrency(parseFloat(summary.faturamento_total || 0))}
+              </p>
+            </div>
+            <div className="text-4xl">💰</div>
+          </div>
+        </Card>
+
+        {/* Card: Agendamentos Finalizados */}
+        <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600 font-medium">Agendamentos (mês)</p>
+              <p className="text-2xl font-bold text-blue-700 mt-1">
+                {isLoadingSummary ? '...' : summary.total_appointments_finalizados || 0}
+              </p>
+            </div>
+            <div className="text-4xl">📅</div>
+          </div>
+        </Card>
+
+        {/* Card: Ticket Médio */}
+        <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600 font-medium">Ticket Médio</p>
+              <p className="text-2xl font-bold text-purple-700 mt-1">
+                {isLoadingSummary ? '...' : formatCurrency(parseFloat(summary.ticket_medio || 0))}
+              </p>
+            </div>
+            <div className="text-4xl">📊</div>
+          </div>
+        </Card>
+
+        {/* Card: Aniversariantes do Mês */}
+        <Card className="bg-gradient-to-br from-pink-50 to-pink-100 border-pink-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600 font-medium">Aniversariantes</p>
+              <p className="text-2xl font-bold text-pink-700 mt-1">
+                {birthdaysCount}
+              </p>
+            </div>
+            <div className="text-4xl">🎂</div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Dica de Promoção (quando ticket médio estiver baixo) */}
+      {!isLoadingSummary && summary.ticket_medio > 0 && summary.ticket_medio < 100 && mostPopularServiceName && (
+        <Card className="bg-yellow-50 border-yellow-200">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 text-2xl">💡</div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-yellow-900 mb-1">
+                Dica de Negócio
+              </h3>
+              <p className="text-sm text-yellow-800">
+                Que tal criar uma promoção para o serviço <strong>{mostPopularServiceName}</strong>? 
+                Isso pode ajudar a aumentar seu ticket médio!
+              </p>
+            </div>
+            <Link 
+              to="/admin/servicos" 
+              className="flex-shrink-0 text-yellow-700 hover:text-yellow-900 font-semibold text-sm underline"
+            >
+              Criar Promoção →
+            </Link>
+          </div>
+        </Card>
+      )}
+
+      {/* Cards de Resumo Adicional */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card>
           <div className="flex items-center justify-between">
