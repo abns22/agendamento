@@ -211,32 +211,46 @@ async def get_dashboard_summary(
         descontos_result = await db.execute(descontos_query)
         total_descontos = descontos_result.scalar() or Decimal('0.00')
         
-        # 3. TOTAL DE AGENDAMENTOS FINALIZADOS (para calcular ticket médio)
+        # 3. TOTAL DE AGENDAMENTOS FINALIZADOS: Contar TODOS os appointments COMPLETED do período
+        # Baseado na data do agendamento (start_datetime), não na transaction
+        # Isso inclui agendamentos manuais e agendamentos pelo booking
         appointments_finalizados_query = select(func.count(Appointment.id)).where(
             and_(
                 Appointment.tenant_id == tenant_id_str,
                 Appointment.status == AppointmentStatus.COMPLETED,
-                # Filtrar por appointments que têm transaction no período
-                Appointment.id.in_(
-                    select(Transaction.appointment_id).where(
-                        and_(
-                            Transaction.tenant_id == tenant_id_str,
-                            Transaction.date_time >= period_start_dt,
-                            Transaction.date_time <= period_end_dt
-                        )
-                    )
-                )
+                Appointment.start_datetime >= period_start_dt,
+                Appointment.start_datetime <= period_end_dt
             )
         )
         appointments_finalizados_result = await db.execute(appointments_finalizados_query)
         total_appointments_finalizados = appointments_finalizados_result.scalar() or 0
         
-        # 4. TICKET MÉDIO: Faturamento Total / Número de agendamentos finalizados
-        ticket_medio = Decimal('0.00')
-        if total_appointments_finalizados > 0:
-            ticket_medio = faturamento_total / Decimal(str(total_appointments_finalizados))
+        # 4. CONTAR AGENDAMENTOS COM TRANSACTION (para ticket médio)
+        # O ticket médio deve considerar apenas agendamentos que têm transaction (já que faturamento só considera esses)
+        appointments_com_transaction_query = select(func.count(func.distinct(Transaction.appointment_id))).where(
+            and_(
+                Transaction.tenant_id == tenant_id_str,
+                Transaction.date_time >= period_start_dt,
+                Transaction.date_time <= period_end_dt,
+                Transaction.appointment_id.in_(
+                    select(Appointment.id).where(
+                        and_(
+                            Appointment.tenant_id == tenant_id_str,
+                            Appointment.status == AppointmentStatus.COMPLETED
+                        )
+                    )
+                )
+            )
+        )
+        appointments_com_transaction_result = await db.execute(appointments_com_transaction_query)
+        total_appointments_com_transaction = appointments_com_transaction_result.scalar() or 0
         
-        # 5. SERVIÇO MAIS PROCURADO: Contar ocorrências em appointment_services
+        # 5. TICKET MÉDIO: Faturamento Total / Número de agendamentos com transaction
+        ticket_medio = Decimal('0.00')
+        if total_appointments_com_transaction > 0:
+            ticket_medio = faturamento_total / Decimal(str(total_appointments_com_transaction))
+        
+        # 6. SERVIÇO MAIS PROCURADO: Contar ocorrências em appointment_services
         # Filtrando por appointments COMPLETED que têm transaction no período
         # Subquery para obter appointment_ids que têm transaction no período
         appointment_ids_subquery = select(Transaction.appointment_id).where(

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, Button, Modal, Input } from '../../components/ui'
 import { api, formatCurrency } from '../../utils/api'
@@ -8,6 +8,7 @@ import { api, formatCurrency } from '../../utils/api'
  */
 const InventoryPage = () => {
   const [inventorySummary, setInventorySummary] = useState(null)
+  const [categories, setCategories] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false)
@@ -18,8 +19,14 @@ const InventoryPage = () => {
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  // Filtros e busca
+  const [searchQuery, setSearchQuery] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [stockFilter, setStockFilter] = useState('all') // 'all', 'in_stock', 'out_of_stock', 'low_stock'
+
   useEffect(() => {
     fetchInventorySummary()
+    fetchCategories()
   }, [])
 
   const fetchInventorySummary = async () => {
@@ -33,6 +40,16 @@ const InventoryPage = () => {
       setError(err.response?.data?.detail || 'Erro ao carregar inventário')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const fetchCategories = async () => {
+    try {
+      const response = await api.get('/api/v1/admin/product-categories')
+      setCategories(response.data || [])
+    } catch (err) {
+      console.error('Erro ao carregar categorias:', err)
+      // Não mostrar erro ao usuário, apenas não mostrar categorias no filtro
     }
   }
 
@@ -120,6 +137,40 @@ const InventoryPage = () => {
     return labels[type] || type
   }
 
+  // Filtrar itens com base nos filtros e busca
+  const filteredItems = useMemo(() => {
+    if (!inventorySummary || !inventorySummary.items) return []
+
+    let items = [...inventorySummary.items]
+
+    // Filtro de busca (nome do produto ou categoria)
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim()
+      items = items.filter(item => 
+        item.product_name.toLowerCase().includes(query) ||
+        (item.category_name && item.category_name.toLowerCase().includes(query))
+      )
+    }
+
+    // Filtro por categoria
+    if (categoryFilter) {
+      items = items.filter(item => 
+        item.category_name === categoryFilter
+      )
+    }
+
+    // Filtro por status de estoque
+    if (stockFilter === 'in_stock') {
+      items = items.filter(item => item.total_quantity > 0)
+    } else if (stockFilter === 'out_of_stock') {
+      items = items.filter(item => item.total_quantity === 0)
+    } else if (stockFilter === 'low_stock') {
+      items = items.filter(item => item.total_quantity > 0 && item.total_quantity < 10)
+    }
+
+    return items
+  }, [inventorySummary, searchQuery, categoryFilter, stockFilter])
+
   return (
     <div className="space-y-6">
       {/* Cabeçalho */}
@@ -142,6 +193,90 @@ const InventoryPage = () => {
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           {error}
         </div>
+      )}
+
+      {/* Filtros e Busca */}
+      {inventorySummary && inventorySummary.items.length > 0 && (
+        <Card className="p-4">
+          <div className="space-y-4">
+            {/* Campo de Busca */}
+            <div>
+              <label className="block text-sm font-semibold text-text mb-2">
+                Buscar Produto ou Categoria
+              </label>
+              <Input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Digite o nome do produto ou categoria..."
+                className="w-full"
+              />
+            </div>
+
+            {/* Filtros */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Filtro por Categoria */}
+              <div>
+                <label className="block text-sm font-semibold text-text mb-2">
+                  Filtrar por Categoria
+                </label>
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="">Todas as categorias</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.name}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Filtro por Status de Estoque */}
+              <div>
+                <label className="block text-sm font-semibold text-text mb-2">
+                  Filtrar por Estoque
+                </label>
+                <select
+                  value={stockFilter}
+                  onChange={(e) => setStockFilter(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="all">Todos</option>
+                  <option value="in_stock">Com Estoque</option>
+                  <option value="out_of_stock">Sem Estoque</option>
+                  <option value="low_stock">Estoque Baixo (&lt; 10)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Botão de Limpar Filtros */}
+            {(searchQuery || categoryFilter || stockFilter !== 'all') && (
+              <div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery('')
+                    setCategoryFilter('')
+                    setStockFilter('all')
+                  }}
+                >
+                  Limpar Filtros
+                </Button>
+              </div>
+            )}
+
+            {/* Resultado da busca */}
+            {filteredItems.length !== inventorySummary.items.length && (
+              <div className="text-sm text-gray-600">
+                Mostrando {filteredItems.length} de {inventorySummary.items.length} produtos
+              </div>
+            )}
+          </div>
+        </Card>
       )}
 
       {/* Resumo Geral */}
@@ -174,34 +309,36 @@ const InventoryPage = () => {
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
         </div>
       ) : inventorySummary && inventorySummary.items.length > 0 ? (
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="bg-gray-100">
-                  <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
-                    Produto
-                  </th>
-                  <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
-                    Categoria
-                  </th>
-                  <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
-                    Custo Unitário
-                  </th>
-                  <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
-                    Quantidade
-                  </th>
-                  <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
-                    Valor Total
-                  </th>
-                  <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold">
-                    Ações
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {inventorySummary.items.map((item) => (
-                  <tr key={item.product_id} className="hover:bg-gray-50">
+        <>
+          {filteredItems.length > 0 ? (
+            <Card>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
+                        Produto
+                      </th>
+                      <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
+                        Categoria
+                      </th>
+                      <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
+                        Custo Unitário
+                      </th>
+                      <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
+                        Quantidade
+                      </th>
+                      <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
+                        Valor Total
+                      </th>
+                      <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold">
+                        Ações
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredItems.map((item) => (
+                      <tr key={item.product_id} className="hover:bg-gray-50">
                     <td className="border border-gray-300 px-4 py-3 text-sm font-semibold">
                       {item.product_name}
                     </td>
@@ -228,12 +365,36 @@ const InventoryPage = () => {
                         Ajustar Estoque
                       </Button>
                     </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ) : (
+            <Card>
+              <div className="text-center py-12">
+                <div className="text-6xl mb-4">🔍</div>
+                <h3 className="text-lg font-semibold text-text mb-2">
+                  Nenhum produto encontrado
+                </h3>
+                <p className="text-gray-600 mb-6">
+                  Tente ajustar os filtros de busca
+                </p>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setSearchQuery('')
+                    setCategoryFilter('')
+                    setStockFilter('all')
+                  }}
+                >
+                  Limpar Filtros
+                </Button>
+              </div>
+            </Card>
+          )}
+        </>
       ) : (
         <Card>
           <div className="text-center py-12">
