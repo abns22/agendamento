@@ -81,22 +81,29 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
     return () => clearTimeout(timeoutId)
   }, [clientSearchQuery, isOpen])
 
+  // Função auxiliar para converter data ISO para YYYY-MM-DD sem problemas de timezone
+  const isoDateToDateInput = useCallback((isoDateString) => {
+    if (!isoDateString) return ''
+    // Se a string já está no formato YYYY-MM-DD, retornar direto
+    if (/^\d{4}-\d{2}-\d{2}$/.test(isoDateString)) {
+      return isoDateString
+    }
+    // Para strings ISO (ex: "2024-01-15T00:00:00Z"), extrair apenas a parte da data
+    // Isso evita problemas de conversão de timezone
+    const datePart = isoDateString.split('T')[0]
+    return datePart || ''
+  }, [])
+
   // Selecionar cliente do autocomplete
   const handleSelectClient = useCallback((client) => {
     setSelectedClientId(client.id)
     setCustomerName(client.name)
     setCustomerContact(client.phone_number || '')
     // Formatar data de nascimento para YYYY-MM-DD (formato do input date)
-    if (client.birth_date) {
-      const birthDate = new Date(client.birth_date)
-      const formattedDate = format(birthDate, 'yyyy-MM-dd')
-      setCustomerBirthDate(formattedDate)
-    } else {
-      setCustomerBirthDate('')
-    }
+    setCustomerBirthDate(isoDateToDateInput(client.birth_date))
     setShowClientSuggestions(false)
     setClientSearchQuery('')
-  }, [])
+  }, [isoDateToDateInput])
 
   // Limpar seleção de cliente (permitir cadastro manual)
   const handleClearClientSelection = useCallback(() => {

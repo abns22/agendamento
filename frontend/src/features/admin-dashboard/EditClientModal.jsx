@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Modal, Button, Input } from '../../components/ui'
 import { api } from '../../utils/api'
-import { format } from 'date-fns'
 
 /**
  * Modal de Edição de Cliente.
@@ -18,6 +17,19 @@ const EditClientModal = ({ isOpen, onClose, client, onSuccess }) => {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState(null)
 
+  // Função auxiliar para converter data ISO para YYYY-MM-DD sem problemas de timezone
+  const isoDateToDateInput = (isoDateString) => {
+    if (!isoDateString) return ''
+    // Se a string já está no formato YYYY-MM-DD, retornar direto
+    if (/^\d{4}-\d{2}-\d{2}$/.test(isoDateString)) {
+      return isoDateString
+    }
+    // Para strings ISO (ex: "2024-01-15T00:00:00Z"), extrair apenas a parte da data
+    // Isso evita problemas de conversão de timezone
+    const datePart = isoDateString.split('T')[0]
+    return datePart || ''
+  }
+
   // Preencher formulário quando cliente mudar
   useEffect(() => {
     if (client) {
@@ -25,9 +37,7 @@ const EditClientModal = ({ isOpen, onClose, client, onSuccess }) => {
         name: client.name || '',
         phone_number: client.phone_number || '',
         email: client.email || '',
-        birth_date: client.birth_date 
-          ? format(new Date(client.birth_date), 'yyyy-MM-dd')
-          : ''
+        birth_date: isoDateToDateInput(client.birth_date)
       })
       setError(null)
     }
