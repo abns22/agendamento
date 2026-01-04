@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../utils/api'
-import { Card, Button } from '../../components/ui'
+import { Card, Button, Modal } from '../../components/ui'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import EditClientModal from './EditClientModal'
 
 /**
  * Página de Gerenciamento de Clientes.
@@ -21,6 +22,10 @@ const ClientsPage = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(null) // null = "Todos", 1-12 = mês específico
   const [tenantName, setTenantName] = useState('Estúdio') // Nome do tenant para mensagem do WhatsApp
+  const [editingClient, setEditingClient] = useState(null) // Cliente sendo editado
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [deletingClientId, setDeletingClientId] = useState(null) // ID do cliente sendo deletado
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
 
   // Meses do ano
   const months = [
@@ -167,6 +172,55 @@ const ClientsPage = () => {
     }
   }
 
+  // Abrir modal de edição
+  const handleEditClick = (client) => {
+    setEditingClient(client)
+    setIsEditModalOpen(true)
+  }
+
+  // Fechar modal de edição
+  const handleCloseEditModal = () => {
+    setIsEditModalOpen(false)
+    setEditingClient(null)
+  }
+
+  // Sucesso na edição
+  const handleEditSuccess = () => {
+    fetchClients() // Recarregar lista
+    handleCloseEditModal()
+  }
+
+  // Abrir modal de confirmação de exclusão
+  const handleDeleteClick = (client) => {
+    setDeletingClientId(client.id)
+    setIsDeleteModalOpen(true)
+  }
+
+  // Fechar modal de exclusão
+  const handleCloseDeleteModal = () => {
+    setIsDeleteModalOpen(false)
+    setDeletingClientId(null)
+  }
+
+  // Confirmar exclusão
+  const handleConfirmDelete = async () => {
+    if (!deletingClientId) return
+
+    try {
+      await api.delete(`/api/v1/admin/clients/${deletingClientId}`)
+      handleCloseDeleteModal()
+      fetchClients() // Recarregar lista
+    } catch (err) {
+      console.error('Erro ao excluir cliente:', err)
+      alert(err.response?.data?.detail || 'Erro ao excluir cliente. Tente novamente.')
+    }
+  }
+
+  // Obter nome do cliente sendo deletado
+  const deletingClientName = deletingClientId 
+    ? clients.find(c => c.id === deletingClientId)?.name 
+    : ''
+
   return (
     <div className="space-y-6">
       {/* Cabeçalho */}
@@ -284,6 +338,27 @@ const ClientsPage = () => {
                         </p>
                       )}
                     </div>
+                    {/* Botões de ação */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => handleEditClick(client)}
+                        className="p-2 text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                        title="Editar cliente"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteClick(client)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Excluir cliente"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Informações do Cliente */}
@@ -344,6 +419,46 @@ const ClientsPage = () => {
           })}
         </div>
       )}
+
+      {/* Modal de Edição */}
+      <EditClientModal
+        isOpen={isEditModalOpen}
+        onClose={handleCloseEditModal}
+        client={editingClient}
+        onSuccess={handleEditSuccess}
+      />
+
+      {/* Modal de Confirmação de Exclusão */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={handleCloseDeleteModal}
+        title="Confirmar Exclusão"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-700">
+            Tem certeza que deseja excluir o cliente <strong>{deletingClientName}</strong>?
+          </p>
+          <p className="text-sm text-gray-600">
+            Esta ação não pode ser desfeita. O cliente será removido permanentemente do sistema.
+          </p>
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="secondary"
+              onClick={handleCloseDeleteModal}
+              className="flex-1"
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleConfirmDelete}
+              className="flex-1 bg-red-600 hover:bg-red-700"
+            >
+              Excluir
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
