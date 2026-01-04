@@ -37,11 +37,13 @@ async def create_product(
     tenant_id_str = str(tenant.id)
     
     # Validar categoria se fornecida
+    category_id_str = None
     if product_data.category_id:
+        category_id_str = str(product_data.category_id)
         category_result = await db.execute(
             select(ProductCategory).where(
                 and_(
-                    ProductCategory.id == str(product_data.category_id),
+                    ProductCategory.id == category_id_str,
                     ProductCategory.tenant_id == tenant_id_str
                 )
             )
@@ -52,9 +54,16 @@ async def create_product(
                 detail="Categoria não encontrada"
             )
     
+    # Converter dados para criar o produto (category_id deve ser string)
+    product_dict = product_data.model_dump()
+    if category_id_str:
+        product_dict['category_id'] = category_id_str
+    elif 'category_id' in product_dict:
+        product_dict['category_id'] = None
+    
     new_product = Product(
         tenant_id=tenant_id_str,
-        **product_data.model_dump()
+        **product_dict
     )
     db.add(new_product)
     await db.commit()
@@ -138,11 +147,13 @@ async def update_product(
     tenant_id_str = str(tenant.id)
     
     # Validar categoria se fornecida
+    category_id_str = None
     if update_data.category_id:
+        category_id_str = str(update_data.category_id)
         category_result = await db.execute(
             select(ProductCategory).where(
                 and_(
-                    ProductCategory.id == str(update_data.category_id),
+                    ProductCategory.id == category_id_str,
                     ProductCategory.tenant_id == tenant_id_str
                 )
             )
@@ -168,7 +179,14 @@ async def update_product(
             detail="Produto não encontrado"
         )
 
-    for field, value in update_data.model_dump(exclude_unset=True).items():
+    # Converter dados para atualizar (category_id deve ser string)
+    update_dict = update_data.model_dump(exclude_unset=True)
+    if category_id_str is not None:
+        update_dict['category_id'] = category_id_str
+    elif 'category_id' in update_dict and update_dict['category_id'] is None:
+        update_dict['category_id'] = None
+    
+    for field, value in update_dict.items():
         setattr(product, field, value)
 
     await db.commit()
