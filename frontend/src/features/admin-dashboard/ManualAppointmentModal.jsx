@@ -724,11 +724,21 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
                     >
                       <div className="font-semibold text-text">{client.name}</div>
                       <div className="text-sm text-gray-600">{client.phone_number}</div>
-                      {client.birth_date && (
-                        <div className="text-xs text-gray-500 mt-1">
-                          Nascimento: {format(new Date(client.birth_date), 'dd/MM/yyyy', { locale: ptBR })}
-                        </div>
-                      )}
+                      {client.birth_date && (() => {
+                        // Extrair apenas a parte da data (YYYY-MM-DD) para evitar problemas de timezone
+                        let dateStr = client.birth_date
+                        if (typeof client.birth_date === 'string' && client.birth_date.includes('T')) {
+                          dateStr = client.birth_date.split('T')[0]
+                        }
+                        // Parsear a data diretamente: YYYY-MM-DD
+                        const [year, month, day] = dateStr.split('-').map(Number)
+                        const date = new Date(year, month - 1, day) // month é 0-indexed no JS
+                        return (
+                          <div className="text-xs text-gray-500 mt-1">
+                            Nascimento: {format(date, 'dd/MM/yyyy', { locale: ptBR })}
+                          </div>
+                        )
+                      })()}
                     </button>
                   ))}
                 </div>

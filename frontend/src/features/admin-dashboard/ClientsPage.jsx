@@ -127,11 +127,18 @@ const ClientsPage = () => {
     return phone
   }
 
-  // Formatar data de nascimento
+  // Formatar data de nascimento (evitando problemas de timezone)
   const formatBirthDate = (birthDate) => {
     if (!birthDate) return 'Não informado'
     try {
-      const date = new Date(birthDate)
+      // Extrair apenas a parte da data (YYYY-MM-DD) para evitar problemas de timezone
+      let dateStr = birthDate
+      if (typeof birthDate === 'string' && birthDate.includes('T')) {
+        dateStr = birthDate.split('T')[0]
+      }
+      // Parsear a data diretamente: YYYY-MM-DD
+      const [year, month, day] = dateStr.split('-').map(Number)
+      const date = new Date(year, month - 1, day) // month é 0-indexed no JS
       return format(date, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })
     } catch (error) {
       return 'Data inválida'
@@ -161,12 +168,18 @@ const ClientsPage = () => {
     window.open(whatsappUrl, '_blank')
   }
 
-  // Obter dia do mês do aniversário
+  // Obter dia do mês do aniversário (evitando problemas de timezone)
   const getBirthdayDay = (birthDate) => {
     if (!birthDate) return null
     try {
-      const date = new Date(birthDate)
-      return date.getDate()
+      // Extrair apenas a parte da data (YYYY-MM-DD) para evitar problemas de timezone
+      let dateStr = birthDate
+      if (typeof birthDate === 'string' && birthDate.includes('T')) {
+        dateStr = birthDate.split('T')[0]
+      }
+      // Parsear a data diretamente: YYYY-MM-DD
+      const [year, month, day] = dateStr.split('-').map(Number)
+      return day
     } catch (error) {
       return null
     }

@@ -314,7 +314,7 @@ const ServicesPage = () => {
                     <h3 className="text-lg font-semibold text-text">
                       {service.name}
                     </h3>
-                    {service.is_promotional && (
+                    {service.promotion_active && service.is_promotional && (
                       <span
                         className="px-2 py-1 text-xs font-bold text-white rounded-full"
                         style={{
@@ -332,7 +332,7 @@ const ServicesPage = () => {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium mr-2">💰 Preço:</span>
-                      {service.is_promotional && service.promotional_value ? (
+                      {service.promotion_active && service.is_promotional && service.promotional_value ? (
                         <>
                           <span className="line-through text-gray-400">
                             {formatCurrency(parseFloat(service.price))}
@@ -352,7 +352,7 @@ const ServicesPage = () => {
                         </span>
                       )}
                     </div>
-                    {service.is_promotional && service.promotion_display_name && (
+                    {service.promotion_active && service.is_promotional && service.promotion_display_name && (
                       <div className="flex items-center">
                         <span className="text-xs font-medium text-gray-500">
                           📢 {service.promotion_display_name}
