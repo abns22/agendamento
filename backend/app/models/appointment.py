@@ -27,8 +27,9 @@ class Appointment(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
     service_id = Column(String(36), ForeignKey("services.id"), nullable=True, index=True)  # DEPRECATED: Use services relationship. Mantido para compatibilidade com bloqueios e dados existentes
-    customer_name = Column(String(200), nullable=True)  # Nullable para bloqueios
-    customer_phone = Column(String(20), nullable=True)  # Nullable para bloqueios
+    client_id = Column(String(36), ForeignKey("clients.id"), nullable=True, index=True)  # FK para tabela de clientes (CRM)
+    customer_name = Column(String(200), nullable=True)  # Nullable para bloqueios. Mantido como fallback/histórico
+    customer_phone = Column(String(20), nullable=True)  # Nullable para bloqueios. Mantido como fallback/histórico
     start_datetime = Column(DateTime, nullable=False, index=True)  # UTC (MySQL não suporta timezone=True)
     end_datetime = Column(DateTime, nullable=False)  # UTC
     status = Column(SQLEnum(AppointmentStatus), default=AppointmentStatus.SCHEDULED, nullable=False, index=True)
@@ -48,6 +49,13 @@ class Appointment(Base):
         secondary="appointment_services",
         back_populates="appointments",
         lazy="selectin"  # Carregar serviços junto com o appointment
+    )
+    
+    # Relação com Client (CRM)
+    client = relationship(
+        "Client",
+        foreign_keys=[client_id],
+        lazy="selectin"  # Carregar cliente junto com o appointment
     )
     
     def __repr__(self):

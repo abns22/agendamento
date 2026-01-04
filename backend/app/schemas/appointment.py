@@ -3,7 +3,7 @@ Schemas Pydantic para a entidade Appointment (Agendamento).
 """
 from pydantic import BaseModel, Field, field_validator, model_validator
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, List
 from decimal import Decimal
 
@@ -54,8 +54,10 @@ class ManualAppointmentCreate(BaseModel):
     """Schema para criação de agendamento manual pelo administrador."""
     service_ids: Optional[List[UUID]] = Field(None, min_length=1, description="Lista de UUIDs dos serviços a serem agendados")
     data_agendamento: datetime = Field(..., description="Data e hora de início do agendamento (UTC)")
+    client_id: Optional[UUID] = Field(None, description="ID do cliente (opcional, se não fornecido será criado/buscado pelo telefone)")
     cliente_nome: str = Field(..., min_length=2, max_length=200, description="Nome do cliente")
     cliente_contato: str = Field(..., min_length=10, max_length=20, description="Contato (telefone ou e-mail) do cliente")
+    cliente_aniversario: Optional[date] = Field(None, description="Data de nascimento do cliente (opcional)")
     
     # Compatibilidade retroativa: aceitar service_id único também
     service_id: Optional[UUID] = Field(None, description="DEPRECATED: Use service_ids. UUID único do serviço (para compatibilidade)")

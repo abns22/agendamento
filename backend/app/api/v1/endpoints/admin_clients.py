@@ -22,6 +22,59 @@ router = APIRouter(prefix="/admin/clients", tags=["Admin - Clients"])
 
 
 @router.get(
+    "/search",
+    response_model=List[ClientResponse],
+    summary="Buscar clientes (autocomplete)",
+    description="Busca rápida de clientes por nome ou telefone. Retorna no máximo 10 resultados para autocomplete."
+)
+async def search_clients(
+    q: str = Query(..., min_length=1, description="Termo de busca (nome ou telefone)"),
+    tenant: Tenant = Depends(get_current_active_tenant),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Busca rápida de clientes para autocomplete.
+    
+    Busca clientes por nome ou telefone usando busca parcial (ILIKE).
+    Retorna no máximo 10 resultados para manter a performance.
+    
+    Args:
+        q: Termo de busca (mínimo 1 caractere)
+        tenant: Tenant autenticado
+        db: Sessão do banco de dados
+        
+    Returns:
+        List[ClientResponse]: Lista de até 10 clientes encontrados
+        
+    Exemplo:
+        GET /api/v1/admin/clients/search?q=joão
+        - Busca clientes com "joão" no nome ou telefone
+    """
+    tenant_id_str = str(tenant.id)
+    
+    # Normalizar termo de busca (lowercase para busca case-insensitive)
+    search_term = f"%{q.lower()}%"
+    
+    # Buscar clientes do tenant por nome ou telefone
+    query = select(Client).where(
+        and_(
+            Client.tenant_id == tenant_id_str,
+            or_(
+                func.lower(Client.name).like(search_term),
+                func.lower(Client.phone_number).like(search_term)
+            )
+        )
+    ).order_by(
+        Client.name.asc()
+    ).limit(10)  # Limitar a 10 resultados para performance
+    
+    result = await db.execute(query)
+    clients = result.scalars().all()
+    
+    return [ClientResponse.model_validate(client) for client in clients]
+
+
+@router.get(
     "",
     response_model=List[ClientResponse],
     summary="Listar clientes",

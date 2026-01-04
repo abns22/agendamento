@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { api, formatDuration, formatCurrency } from '../../utils/api'
@@ -18,6 +18,12 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
   const [selectedServices, setSelectedServices] = useState([]) // Array de serviços selecionados
   const [customerName, setCustomerName] = useState('')
   const [customerContact, setCustomerContact] = useState('')
+  const [customerBirthDate, setCustomerBirthDate] = useState('') // Data de nascimento (YYYY-MM-DD)
+  const [selectedClientId, setSelectedClientId] = useState(null) // ID do cliente selecionado (se houver)
+  const [clientSearchQuery, setClientSearchQuery] = useState('') // Termo de busca de clientes
+  const [clientSearchResults, setClientSearchResults] = useState([]) // Resultados da busca
+  const [isSearchingClients, setIsSearchingClients] = useState(false) // Loading da busca
+  const [showClientSuggestions, setShowClientSuggestions] = useState(false) // Mostrar/ocultar sugestões
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState(null)
 
@@ -29,10 +35,94 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
       setSelectedServices([])
       setCustomerName('')
       setCustomerContact('')
+      setCustomerBirthDate('')
+      setSelectedClientId(null)
+      setClientSearchQuery('')
+      setClientSearchResults([])
+      setShowClientSuggestions(false)
       setError(null)
       setAvailableSlots([])
     }
   }, [isOpen, services])
+
+  // Buscar clientes com debounce
+  useEffect(() => {
+    if (!isOpen) return
+    
+    // Se query está vazia, limpar resultados
+    if (!clientSearchQuery.trim()) {
+      setClientSearchResults([])
+      setShowClientSuggestions(false)
+      return
+    }
+
+    // Debounce: aguardar 300ms após parar de digitar
+    const timeoutId = setTimeout(async () => {
+      if (clientSearchQuery.trim().length < 2) {
+        setClientSearchResults([])
+        setShowClientSuggestions(false)
+        return
+      }
+
+      try {
+        setIsSearchingClients(true)
+        const response = await api.get(`/api/v1/admin/clients/search?q=${encodeURIComponent(clientSearchQuery.trim())}`)
+        setClientSearchResults(response.data || [])
+        setShowClientSuggestions(true)
+      } catch (err) {
+        console.error('Erro ao buscar clientes:', err)
+        setClientSearchResults([])
+        setShowClientSuggestions(false)
+      } finally {
+        setIsSearchingClients(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timeoutId)
+  }, [clientSearchQuery, isOpen])
+
+  // Selecionar cliente do autocomplete
+  const handleSelectClient = useCallback((client) => {
+    setSelectedClientId(client.id)
+    setCustomerName(client.name)
+    setCustomerContact(client.phone_number || '')
+    // Formatar data de nascimento para YYYY-MM-DD (formato do input date)
+    if (client.birth_date) {
+      const birthDate = new Date(client.birth_date)
+      const formattedDate = format(birthDate, 'yyyy-MM-dd')
+      setCustomerBirthDate(formattedDate)
+    } else {
+      setCustomerBirthDate('')
+    }
+    setShowClientSuggestions(false)
+    setClientSearchQuery('')
+  }, [])
+
+  // Limpar seleção de cliente (permitir cadastro manual)
+  const handleClearClientSelection = useCallback(() => {
+    setSelectedClientId(null)
+    setCustomerName('')
+    setCustomerContact('')
+    setCustomerBirthDate('')
+    setClientSearchQuery('')
+    setShowClientSuggestions(false)
+  }, [])
+
+  // Fechar sugestões ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showClientSuggestions && !event.target.closest('.client-search-container')) {
+        setShowClientSuggestions(false)
+      }
+    }
+
+    if (showClientSuggestions) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside)
+      }
+    }
+  }, [showClientSuggestions])
 
   // Buscar slots disponíveis quando data mudar
   useEffect(() => {
@@ -185,7 +275,11 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
         service_ids: selectedServices.map(s => s.id), // Array de IDs de serviços
         data_agendamento: utcDateTime.toISOString(),
         cliente_nome: customerName.trim(),
-        cliente_contato: customerContact.trim()
+        cliente_contato: customerContact.trim(),
+        // Se cliente foi selecionado, enviar client_id, senão enviar apenas dados para criar/buscar
+        ...(selectedClientId ? { client_id: selectedClientId } : {}),
+        // Enviar aniversário se preenchido (formato YYYY-MM-DD)
+        ...(customerBirthDate ? { cliente_aniversario: customerBirthDate } : {})
       }
 
       await api.post('/api/v1/admin/appointments/manual', payload)
@@ -567,6 +661,79 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
 
         {/* Dados do Cliente */}
         <div className="space-y-4">
+          {/* Busca de Cliente (Autocomplete) */}
+          <div className="client-search-container">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Buscar Cliente Existente (Opcional)
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={clientSearchQuery}
+                onChange={(e) => {
+                  setClientSearchQuery(e.target.value)
+                  setError(null)
+                  // Se limpar a busca, também limpar seleção
+                  if (!e.target.value.trim()) {
+                    handleClearClientSelection()
+                  }
+                }}
+                onFocus={() => {
+                  if (clientSearchResults.length > 0) {
+                    setShowClientSuggestions(true)
+                  }
+                }}
+                className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base"
+                placeholder="Digite nome ou telefone para buscar..."
+                disabled={!!selectedClientId}
+              />
+              {selectedClientId && (
+                <button
+                  type="button"
+                  onClick={handleClearClientSelection}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  title="Limpar seleção"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+              
+              {/* Sugestões de Clientes */}
+              {showClientSuggestions && clientSearchResults.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-white border-2 border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                  {isSearchingClients && (
+                    <div className="p-4 text-center text-gray-500 text-sm">
+                      Buscando...
+                    </div>
+                  )}
+                  {!isSearchingClients && clientSearchResults.map((client) => (
+                    <button
+                      key={client.id}
+                      type="button"
+                      onClick={() => handleSelectClient(client)}
+                      className="w-full text-left px-4 py-3 hover:bg-primary/10 border-b border-gray-100 last:border-b-0 transition-colors"
+                    >
+                      <div className="font-semibold text-text">{client.name}</div>
+                      <div className="text-sm text-gray-600">{client.phone_number}</div>
+                      {client.birth_date && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          Nascimento: {format(new Date(client.birth_date), 'dd/MM/yyyy', { locale: ptBR })}
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {selectedClientId && (
+              <p className="text-xs text-green-600 mt-1">
+                ✓ Cliente selecionado - Campos preenchidos automaticamente
+              </p>
+            )}
+          </div>
+
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">
               Nome do Cliente *
@@ -576,7 +743,11 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
               value={customerName}
               onChange={(e) => {
                 setCustomerName(e.target.value)
-                setError(null) // Limpar erro ao digitar
+                setError(null)
+                // Se editar manualmente, limpar seleção de cliente
+                if (selectedClientId) {
+                  setSelectedClientId(null)
+                }
               }}
               className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base"
               placeholder="Ex: João Silva"
@@ -597,7 +768,11 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
               value={customerContact}
               onChange={(e) => {
                 setCustomerContact(e.target.value)
-                setError(null) // Limpar erro ao digitar
+                setError(null)
+                // Se editar manualmente, limpar seleção de cliente
+                if (selectedClientId) {
+                  setSelectedClientId(null)
+                }
               }}
               className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base"
               placeholder="Ex: 11987654321 ou email@exemplo.com"
@@ -605,6 +780,29 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
             />
             <p className="text-xs text-gray-500 mt-1">
               Telefone (mínimo 10 dígitos) ou e-mail válido
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Data de Nascimento (Opcional)
+            </label>
+            <input
+              type="date"
+              value={customerBirthDate}
+              onChange={(e) => {
+                setCustomerBirthDate(e.target.value)
+                setError(null)
+                // Se editar manualmente, limpar seleção de cliente
+                if (selectedClientId) {
+                  setSelectedClientId(null)
+                }
+              }}
+              max={format(new Date(), 'yyyy-MM-dd')} // Não permitir datas futuras
+              className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-base"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Informe a data de nascimento para aparecer na seção de aniversariantes
             </p>
           </div>
         </div>

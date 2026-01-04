@@ -19,6 +19,7 @@ from app.models.tenant import Tenant
 from app.models.appointment import Appointment, AppointmentStatus
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.service import Service
+from app.models.client import Client
 from app.models.payment_entry import PaymentEntry
 from app.models.schedule_config import ScheduleConfig
 
@@ -1083,13 +1084,75 @@ async def create_manual_appointment(
             service_ids=service_ids
         )
         
-        # Passo 8: Criar o Appointment no banco de dados
+        # Passo 8: Lógica de UPSERT de Cliente (CRM)
+        # Garantir unificação: usar a mesma tabela de clientes (aniversariantes)
+        # Se client_id for fornecido, validar e usar. Caso contrário, buscar/criar/atualizar pelo telefone
+        client_id_str = None
+        
+        if appointment_data.client_id:
+            # Se client_id foi fornecido, validar que existe e pertence ao tenant
+            client_query = select(Client).where(
+                and_(
+                    Client.id == str(appointment_data.client_id),
+                    Client.tenant_id == tenant_id_str
+                )
+            )
+            client_result = await db.execute(client_query)
+            existing_client = client_result.scalar_one_or_none()
+            
+            if not existing_client:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Cliente não encontrado"
+                )
+            
+            # Se client_id foi fornecido, também atualizar nome e aniversário se informados
+            if appointment_data.cliente_nome:
+                existing_client.name = appointment_data.cliente_nome
+            if appointment_data.cliente_aniversario:
+                existing_client.birth_date = appointment_data.cliente_aniversario
+            
+            client_id_str = str(existing_client.id)
+        else:
+            # Normalizar telefone para busca (remover caracteres não numéricos)
+            phone_clean = ''.join(filter(str.isdigit, appointment_data.cliente_contato))
+            
+            # Buscar cliente existente pelo telefone (mesma tabela de aniversariantes)
+            client_query = select(Client).where(
+                and_(
+                    Client.tenant_id == tenant_id_str,
+                    Client.phone_number == phone_clean
+                )
+            )
+            client_result = await db.execute(client_query)
+            existing_client = client_result.scalar_one_or_none()
+            
+            if existing_client:
+                # Cliente existe: ATUALIZAR nome e aniversário (upsert)
+                existing_client.name = appointment_data.cliente_nome
+                if appointment_data.cliente_aniversario:
+                    existing_client.birth_date = appointment_data.cliente_aniversario
+                client_id_str = str(existing_client.id)
+            else:
+                # Cliente não existe: CRIAR novo registro na mesma tabela
+                new_client = Client(
+                    tenant_id=tenant_id_str,
+                    name=appointment_data.cliente_nome,
+                    phone_number=phone_clean,
+                    birth_date=appointment_data.cliente_aniversario
+                )
+                db.add(new_client)
+                await db.flush()  # Flush para obter o ID
+                client_id_str = str(new_client.id)
+        
+        # Passo 9: Criar o Appointment no banco de dados
         # IMPORTANTE: Converter UUIDs para strings (PostgreSQL armazena UUIDs como String(36))
         new_appointment = Appointment(
             tenant_id=tenant_id_str,
             service_id=str(service_ids[0]) if service_ids else None,  # Mantido para compatibilidade
-            customer_name=appointment_data.cliente_nome,
-            customer_phone=appointment_data.cliente_contato,
+            client_id=client_id_str,  # Vincular ao cliente (CRM)
+            customer_name=appointment_data.cliente_nome,  # Mantido como fallback/histórico
+            customer_phone=appointment_data.cliente_contato,  # Mantido como fallback/histórico
             start_datetime=start_datetime_utc,
             end_datetime=end_datetime_utc,
             status=AppointmentStatus.SCHEDULED,
@@ -1100,7 +1163,7 @@ async def create_manual_appointment(
         db.add(new_appointment)
         await db.flush()  # Flush para obter o ID do appointment
         
-        # Passo 9: Criar registros na tabela intermediária appointment_services
+        # Passo 10: Criar registros na tabela intermediária appointment_services
         for service_id in service_ids:
             appointment_service = AppointmentServiceModel(
                 id=str(uuid.uuid4()),
