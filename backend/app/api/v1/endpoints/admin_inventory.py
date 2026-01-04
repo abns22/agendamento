@@ -175,9 +175,10 @@ async def create_stock_entry(
     tenant_id_str = str(tenant.id)
     
     # Validar que o produto pertence ao tenant
+    product_id_str = str(entry_data.product_id)
     product_query = select(Product).where(
         and_(
-            Product.id == str(entry_data.product_id),
+            Product.id == product_id_str,
             Product.tenant_id == tenant_id_str
         )
     )
@@ -189,7 +190,11 @@ async def create_stock_entry(
             detail="Produto não encontrado"
         )
     
-    new_entry = StockEntry(**entry_data.model_dump())
+    # Converter dados para criar a entrada (product_id deve ser string)
+    entry_dict = entry_data.model_dump()
+    entry_dict['product_id'] = product_id_str
+    
+    new_entry = StockEntry(**entry_dict)
     db.add(new_entry)
     await db.commit()
     await db.refresh(new_entry)
