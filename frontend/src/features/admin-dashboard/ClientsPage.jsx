@@ -102,12 +102,22 @@ const ClientsPage = () => {
     }
   }
 
-  // Verificar se cliente é aniversariante do mês atual
+  // Verificar se cliente é aniversariante do mês atual (evitando problemas de timezone)
   const isCurrentMonthBirthday = (client) => {
     if (!client.birth_date) return false
-    const birthDate = new Date(client.birth_date)
-    const currentMonth = new Date().getMonth() + 1 // getMonth() retorna 0-11
-    return birthDate.getMonth() + 1 === currentMonth
+    try {
+      // Extrair apenas a parte da data (YYYY-MM-DD) para evitar problemas de timezone
+      let dateStr = client.birth_date
+      if (typeof client.birth_date === 'string' && client.birth_date.includes('T')) {
+        dateStr = client.birth_date.split('T')[0]
+      }
+      // Parsear a data diretamente: YYYY-MM-DD
+      const [year, month] = dateStr.split('-').map(Number)
+      const currentMonth = new Date().getMonth() + 1 // getMonth() retorna 0-11
+      return month === currentMonth
+    } catch (error) {
+      return false
+    }
   }
 
   // Formatar telefone brasileiro

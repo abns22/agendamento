@@ -1,7 +1,7 @@
 """
 Schemas Pydantic para validação de entrada/saída da entidade Client.
 """
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, field_serializer
 from uuid import UUID
 from typing import Optional
 from datetime import date
@@ -112,6 +112,13 @@ class ClientResponse(ClientBase):
     id: UUID
     tenant_id: UUID
 
+    @field_serializer('birth_date')
+    def serialize_birth_date(self, value: Optional[date], _info) -> Optional[str]:
+        """Serializa birth_date como string YYYY-MM-DD (sem timezone)."""
+        if value is None:
+            return None
+        return value.isoformat() if isinstance(value, date) else str(value)
+
     class Config:
         from_attributes = True
 
@@ -124,6 +131,11 @@ class BirthdayClientResponse(BaseModel):
     email: Optional[str] = None
     birth_date: date
     day_of_month: int = Field(..., description="Dia do mês do aniversário")
+    
+    @field_serializer('birth_date')
+    def serialize_birth_date(self, value: date, _info) -> str:
+        """Serializa birth_date como string YYYY-MM-DD (sem timezone)."""
+        return value.isoformat() if isinstance(value, date) else str(value)
     
     class Config:
         from_attributes = True
