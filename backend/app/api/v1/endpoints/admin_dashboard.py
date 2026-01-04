@@ -211,19 +211,22 @@ async def get_dashboard_summary(
         descontos_result = await db.execute(descontos_query)
         total_descontos = descontos_result.scalar() or Decimal('0.00')
         
-        # 3. TOTAL DE AGENDAMENTOS FINALIZADOS: Contar TODOS os appointments COMPLETED do período
-        # Baseado na data do agendamento (start_datetime), não na transaction
-        # Isso inclui agendamentos manuais e agendamentos pelo booking
-        appointments_finalizados_query = select(func.count(Appointment.id)).where(
+        # 3. TOTAL DE AGENDAMENTOS DO MÊS: Contar TODOS os appointments do período (exceto CANCELED)
+        # Baseado na data do agendamento (start_datetime)
+        # Isso inclui agendamentos manuais (SCHEDULED), agendamentos pelo booking (PENDING), 
+        # agendamentos confirmados (CONFIRMED) e agendamentos finalizados (COMPLETED)
+        # Exclui apenas bloqueios manuais (is_manual_block=True) e agendamentos cancelados
+        appointments_mes_query = select(func.count(Appointment.id)).where(
             and_(
                 Appointment.tenant_id == tenant_id_str,
-                Appointment.status == AppointmentStatus.COMPLETED,
                 Appointment.start_datetime >= period_start_dt,
-                Appointment.start_datetime <= period_end_dt
+                Appointment.start_datetime <= period_end_dt,
+                Appointment.status != AppointmentStatus.CANCELED,
+                Appointment.is_manual_block == False  # Excluir bloqueios manuais
             )
         )
-        appointments_finalizados_result = await db.execute(appointments_finalizados_query)
-        total_appointments_finalizados = appointments_finalizados_result.scalar() or 0
+        appointments_mes_result = await db.execute(appointments_mes_query)
+        total_appointments_finalizados = appointments_mes_result.scalar() or 0
         
         # 4. CONTAR AGENDAMENTOS COM TRANSACTION (para ticket médio)
         # O ticket médio deve considerar apenas agendamentos que têm transaction (já que faturamento só considera esses)
