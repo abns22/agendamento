@@ -35,9 +35,22 @@ class ClientBase(BaseModel):
     @field_validator('birth_date', mode='before')
     @classmethod
     def validate_birth_date(cls, v) -> Optional[date]:
-        """Converte string vazia para None."""
+        """Converte string vazia para None e garante conversão correta de string para date."""
         if v == "" or v is None:
             return None
+        # Se já é um objeto date, retornar como está
+        if isinstance(v, date):
+            return v
+        # Se é uma string no formato YYYY-MM-DD, converter diretamente
+        if isinstance(v, str):
+            # Evitar problemas de timezone: parsear diretamente YYYY-MM-DD
+            try:
+                parts = v.split('-')
+                if len(parts) == 3:
+                    year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+                    return date(year, month, day)
+            except (ValueError, AttributeError):
+                pass
         return v
 
 
@@ -75,9 +88,22 @@ class ClientUpdate(BaseModel):
     @field_validator('birth_date', mode='before')
     @classmethod
     def validate_birth_date(cls, v) -> Optional[date]:
-        """Converte string vazia para None."""
+        """Converte string vazia para None e garante conversão correta de string para date."""
         if v == "" or v is None:
             return None
+        # Se já é um objeto date, retornar como está
+        if isinstance(v, date):
+            return v
+        # Se é uma string no formato YYYY-MM-DD, converter diretamente
+        if isinstance(v, str):
+            # Evitar problemas de timezone: parsear diretamente YYYY-MM-DD
+            try:
+                parts = v.split('-')
+                if len(parts) == 3:
+                    year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+                    return date(year, month, day)
+            except (ValueError, AttributeError):
+                pass
         return v
 
 
