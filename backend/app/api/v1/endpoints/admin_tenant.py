@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.schemas.tenant import TenantResponse, TenantUpdate
 
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/admin/tenant", tags=["Admin - Tenant"])
     description="Retorna os dados do tenant do usuário autenticado."
 )
 async def get_current_tenant(
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -49,7 +49,7 @@ async def get_current_tenant(
 )
 async def update_tenant_profile(
     tenant_data: TenantUpdate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

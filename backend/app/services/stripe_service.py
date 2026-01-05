@@ -47,7 +47,9 @@ class StripeService:
         plan_price_id: str,
         success_url: str,
         cancel_url: str,
-        customer_email: Optional[str] = None
+        customer_id: Optional[str] = None,
+        customer_email: Optional[str] = None,
+        customer_name: Optional[str] = None
     ) -> dict:
         """
         Cria uma sessão de checkout do Stripe para assinatura mensal.
@@ -55,23 +57,24 @@ class StripeService:
         Este método cria uma URL de checkout onde o administrador do estúdio
         pode inserir seus dados de pagamento e iniciar a assinatura.
         
-        IMPORTANTE: O customer_id será criado automaticamente pelo Stripe
-        durante o checkout. Não armazene o customer_id, apenas o
-        stripe_subscription_id retornado pelo webhook.
+        Se customer_id não for fornecido, um novo Customer será criado no Stripe.
         
         Args:
             tenant_id: UUID do tenant (estúdio) que está assinando
             plan_price_id: ID do preço do plano no Stripe (ex: 'price_1234567890')
             success_url: URL de redirecionamento após pagamento bem-sucedido
             cancel_url: URL de redirecionamento se o usuário cancelar
-            customer_email: Email do administrador (opcional, mas recomendado)
+            customer_id: ID do customer no Stripe (opcional, se já existe)
+            customer_email: Email do administrador (obrigatório se customer_id não fornecido)
+            customer_name: Nome do administrador (opcional)
             
         Returns:
             dict: Dados da sessão de checkout, incluindo 'url' para redirecionamento
                   Exemplo: {
                       'id': 'cs_test_...',
                       'url': 'https://checkout.stripe.com/...',
-                      'subscription': 'sub_...' (após pagamento)
+                      'subscription': 'sub_...' (após pagamento),
+                      'customer_id': 'cus_...' (ID do customer)
                   }
         
         Raises:
@@ -82,10 +85,21 @@ class StripeService:
             raise ValueError("Stripe secret key não configurada")
         
         try:
+            # Obter ou criar customer
+            stripe_customer_id = self.get_or_create_customer(
+                customer_id=customer_id,
+                email=customer_email,
+                name=customer_name,
+                metadata={'tenant_id': str(tenant_id)}
+            )
+            
             # Criar sessão de checkout para assinatura
             checkout_session = stripe.checkout.Session.create(
                 # Modo de assinatura (recurring)
                 mode='subscription',
+                
+                # Customer ID (já criado ou existente)
+                customer=stripe_customer_id,
                 
                 # Preço do plano (price_id)
                 line_items=[
@@ -105,11 +119,7 @@ class StripeService:
                     'tenant_id': str(tenant_id),
                 },
                 
-                # Email do cliente (opcional, mas recomendado)
-                customer_email=customer_email,
-                
-                # Permitir que o Stripe crie o customer automaticamente
-                # Não precisamos armazenar customer_id, apenas subscription_id
+                # Permitir códigos promocionais
                 allow_promotion_codes=True,
                 
                 # Configurações de assinatura
@@ -132,6 +142,7 @@ class StripeService:
                 'id': checkout_session.id,
                 'url': checkout_session.url,
                 'subscription_id': checkout_session.subscription,  # Pode ser None até pagamento
+                'customer_id': stripe_customer_id,  # ID do customer criado/recuperado
             }
             
         except stripe.error.StripeError as e:
@@ -255,4 +266,66 @@ class StripeService:
         except stripe.error.StripeError as e:
             logger.error(f"Erro ao obter status da subscription: {str(e)}")
             return None
+    
+    def get_or_create_customer(
+        self,
+        customer_id: Optional[str],
+        email: Optional[str] = None,
+        name: Optional[str] = None,
+        metadata: Optional[dict] = None
+    ) -> str:
+        """
+        Obtém um Customer existente ou cria um novo no Stripe.
+        
+        Se customer_id for fornecido, tenta recuperar o Customer.
+        Se não existir ou não for fornecido, cria um novo Customer.
+        
+        Args:
+            customer_id: ID do customer no Stripe (opcional, se já existe)
+            email: Email do customer (obrigatório para criar novo)
+            name: Nome do customer (opcional)
+            metadata: Metadados adicionais para o customer (opcional)
+            
+        Returns:
+            str: ID do customer no Stripe
+            
+        Raises:
+            stripe.error.StripeError: Se houver erro na API do Stripe
+            ValueError: Se a chave secreta não estiver configurada ou email não fornecido para novo customer
+        """
+        if not self.secret_key:
+            raise ValueError("Stripe secret key não configurada")
+        
+        # Se customer_id foi fornecido, tentar recuperar
+        if customer_id:
+            try:
+                customer = stripe.Customer.retrieve(customer_id)
+                logger.info(f"Customer existente recuperado: {customer_id}")
+                return customer.id
+            except stripe.error.StripeError as e:
+                # Se o customer não existe, criar um novo
+                logger.warning(f"Customer {customer_id} não encontrado, criando novo: {str(e)}")
+        
+        # Criar novo customer
+        if not email:
+            raise ValueError("Email é obrigatório para criar um novo customer")
+        
+        try:
+            customer_data = {
+                'email': email,
+            }
+            
+            if name:
+                customer_data['name'] = name
+            
+            if metadata:
+                customer_data['metadata'] = metadata
+            
+            customer = stripe.Customer.create(**customer_data)
+            logger.info(f"Novo customer criado: {customer.id}")
+            return customer.id
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Erro ao criar customer: {str(e)}")
+            raise
 

@@ -11,7 +11,7 @@ from typing import Annotated, List, Optional
 from datetime import datetime, timezone
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.appointment import Appointment, AppointmentStatus
 
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/admin/agenda", tags=["Admin - Agenda"])
 )
 async def create_agenda_block(
     block_data: AgendaBlockCreate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -131,7 +131,7 @@ async def create_agenda_block(
 async def list_agenda_blocks(
     start_date: Optional[str] = Query(None, description="Data inicial (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="Data final (YYYY-MM-DD)"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -197,7 +197,7 @@ async def list_agenda_blocks(
 )
 async def get_agenda_block(
     block_id: UUID = Path(..., description="UUID do bloqueio"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -245,7 +245,7 @@ async def get_agenda_block(
 )
 async def delete_agenda_block(
     block_id: UUID = Path(..., description="UUID do bloqueio"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

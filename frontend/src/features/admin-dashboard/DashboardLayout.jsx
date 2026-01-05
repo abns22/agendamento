@@ -21,8 +21,10 @@ const DashboardLayout = ({ children }) => {
   const [tenantName, setTenantName] = useState('Estúdio')
   const [isLoadingTenant, setIsLoadingTenant] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [subscriptionStatus, setSubscriptionStatus] = useState(null)
+  const [shouldShowPaymentPage, setShouldShowPaymentPage] = useState(false)
 
-  // Buscar dados do tenant
+  // Buscar dados do tenant e status da assinatura
   useEffect(() => {
     const fetchTenantData = async () => {
       if (!user?.tenant_id) {
@@ -60,8 +62,71 @@ const DashboardLayout = ({ children }) => {
       }
     }
 
+    const fetchBillingStatus = async () => {
+      try {
+        // Buscar status da assinatura
+        const response = await api.get('/api/v1/admin/billing/status')
+        const billingData = response.data
+        
+        // PRIORIDADE: Se tenant está isento, não mostrar página de pagamento
+        if (billingData.is_exempt) {
+          setShouldShowPaymentPage(false)
+          setSubscriptionStatus('exempt')
+          return
+        }
+        
+        const status = billingData.subscription_status || 'pending'
+        setSubscriptionStatus(status)
+        
+        // Verificar se deve mostrar página de pagamento
+        // Mostrar se status for 'pending' ou 'past_due' (e fora da carência)
+        const currentPeriodEnd = billingData.current_period_end
+        
+        if (status === 'pending' || status === 'past_due') {
+          if (currentPeriodEnd) {
+            // Verificar se passou do período de carência (3 dias após current_period_end)
+            const periodEndDate = new Date(currentPeriodEnd * 1000)
+            const gracePeriodEnd = new Date(periodEndDate)
+            gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 3)
+            const now = new Date()
+            
+            // Se passou do período de carência, mostrar página de pagamento
+            if (now > gracePeriodEnd) {
+              setShouldShowPaymentPage(true)
+              // Redirecionar para página de pagamento se não estiver lá
+              if (location.pathname !== '/admin/pagamento') {
+                navigate('/admin/pagamento', { replace: true })
+              }
+            }
+          } else {
+            // Se não tem current_period_end e status é pending, mostrar página de pagamento
+            if (status === 'pending') {
+              setShouldShowPaymentPage(true)
+              if (location.pathname !== '/admin/pagamento') {
+                navigate('/admin/pagamento', { replace: true })
+              }
+            }
+          }
+        } else if (status === 'active') {
+          // Se status é active, não mostrar página de pagamento
+          setShouldShowPaymentPage(false)
+        }
+      } catch (error) {
+        // Se der erro 402, o interceptador já redireciona para /admin/pagamento
+        // Nesse caso, vamos apenas marcar que deve mostrar a página de pagamento
+        if (error.response?.status === 402) {
+          setShouldShowPaymentPage(true)
+          setSubscriptionStatus('past_due')
+        } else {
+          // Se for outro erro, apenas logar (não bloquear acesso)
+          console.error('Erro ao buscar status da assinatura:', error)
+        }
+      }
+    }
+
     fetchTenantData()
-  }, [user])
+    fetchBillingStatus()
+  }, [user, location.pathname, navigate])
 
   // Fechar sidebar ao mudar de rota (mobile)
   useEffect(() => {
@@ -191,9 +256,17 @@ const DashboardLayout = ({ children }) => {
     }
   ]
 
-  // Filtrar itens baseado no role
+  // Filtrar itens baseado no role e status da assinatura
   // Se `show` não estiver definido, assume `true` (mostrar por padrão)
-  const navItems = baseNavItems.filter(item => item.show !== false)
+  // Esconder menu se deve mostrar página de pagamento (exceto Super Admin)
+  const navItems = baseNavItems.filter(item => {
+    if (item.show === false) return false
+    // Se deve mostrar página de pagamento e não é Super Admin, esconder todos os itens
+    if (shouldShowPaymentPage && !isSuperAdmin()) {
+      return false
+    }
+    return true
+  })
   
   // Itens para o Bottom Nav (mobile) - apenas os essenciais
   // Remover Caixa e Devedores do Bottom Nav, mas manter no sidebar desktop
@@ -257,10 +330,11 @@ const DashboardLayout = ({ children }) => {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar (Desktop) - Oculto em mobile */}
-        <aside className="hidden sm:flex sm:flex-col sm:w-64 bg-white border-r border-gray-200">
-          <nav className="flex-1 px-4 py-6 space-y-2">
-            {navItems.map((item) => {
+        {/* Sidebar (Desktop) - Oculto em mobile e quando deve mostrar página de pagamento */}
+        {!shouldShowPaymentPage && (
+          <aside className="hidden sm:flex sm:flex-col sm:w-64 bg-white border-r border-gray-200">
+            <nav className="flex-1 px-4 py-6 space-y-2">
+              {navItems.map((item) => {
               const isActive = isActiveRoute(item.path)
               return (
                 <Link
@@ -278,12 +352,13 @@ const DashboardLayout = ({ children }) => {
                   <span className="font-medium">{item.label}</span>
                 </Link>
               )
-            })}
-          </nav>
-        </aside>
+              })}
+            </nav>
+          </aside>
+        )}
 
-        {/* Sidebar Mobile (Overlay) */}
-        {sidebarOpen && (
+        {/* Sidebar Mobile (Overlay) - Oculto quando deve mostrar página de pagamento */}
+        {!shouldShowPaymentPage && sidebarOpen && (
           <>
             {/* Overlay */}
             <div
@@ -342,10 +417,11 @@ const DashboardLayout = ({ children }) => {
       {/* Footer - Fora do container flex para ficar sempre na parte inferior */}
       <Footer />
 
-      {/* Barra de Navegação Inferior (Mobile) - Apenas em telas < 640px */}
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-30">
-        <div className="flex justify-around items-center h-16 px-2">
-          {bottomNavItems.map((item) => {
+      {/* Barra de Navegação Inferior (Mobile) - Apenas em telas < 640px e quando não deve mostrar página de pagamento */}
+      {!shouldShowPaymentPage && (
+        <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-30">
+          <div className="flex justify-around items-center h-16 px-2">
+            {bottomNavItems.map((item) => {
             const isActive = isActiveRoute(item.path)
             return (
               <Link
@@ -359,12 +435,13 @@ const DashboardLayout = ({ children }) => {
                 <span className="text-xs font-medium">{item.label}</span>
               </Link>
             )
-          })}
-        </div>
-      </nav>
+            })}
+          </div>
+        </nav>
+      )}
 
       {/* Padding inferior para mobile (evitar sobreposição com bottom nav) */}
-      <div className="sm:hidden h-16" />
+      {!shouldShowPaymentPage && <div className="sm:hidden h-16" />}
     </div>
   )
 }

@@ -17,6 +17,7 @@ import InventoryPage from './features/admin-dashboard/InventoryPage'
 import ProductsPage from './features/admin-dashboard/ProductsPage'
 import ClientsPage from './features/admin-dashboard/ClientsPage'
 import SuperAdminPage from './features/admin-dashboard/SuperAdminPage'
+import PaymentPage from './features/admin-dashboard/PaymentPage'
 
 function App() {
   // Debug: Log quando o componente renderiza
@@ -78,6 +79,7 @@ function App() {
                     <Route path="inventario" element={<InventoryPage />} />
                     <Route path="produtos" element={<ProductsPage />} />
                     <Route path="super-admin" element={<SuperAdminPage />} />
+                    <Route path="pagamento" element={<PaymentPage />} />
                     <Route path="" element={<DashboardPage />} />
                   </Routes>
                 </DashboardLayout>

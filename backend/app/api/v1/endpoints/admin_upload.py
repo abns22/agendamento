@@ -11,7 +11,7 @@ import logging
 from typing import Optional
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_admin_user, get_current_active_tenant
+from app.core.dependencies import get_current_admin_user, verify_subscription_access
 from app.core.config import settings
 from app.models.user import User
 from app.models.tenant import Tenant
@@ -46,7 +46,7 @@ def get_file_extension(content_type: str) -> str:
 async def upload_logo(
     file: UploadFile = File(..., description="Arquivo de imagem (JPEG, PNG, GIF, WebP)"),
     current_user: User = Depends(get_current_admin_user),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

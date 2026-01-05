@@ -12,7 +12,7 @@ from typing import Annotated, List, Optional
 from datetime import date, datetime
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.client import Client
 
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/admin/clients", tags=["Admin - Clients"])
 )
 async def search_clients(
     q: str = Query(..., min_length=1, description="Termo de busca (nome ou telefone)"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -83,7 +83,7 @@ async def search_clients(
 async def list_clients(
     search: Optional[str] = Query(None, description="Buscar por nome ou telefone (busca parcial)"),
     birth_month: Optional[int] = Query(None, ge=1, le=12, description="Filtrar aniversariantes do mês (1-12, onde 1=Janeiro, 12=Dezembro)"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -158,7 +158,7 @@ async def list_clients(
 )
 async def get_client(
     client_id: UUID = Path(..., description="UUID do cliente"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -206,7 +206,7 @@ async def get_client(
 )
 async def create_client(
     client_data: ClientCreate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -261,7 +261,7 @@ async def create_client(
 async def update_client(
     client_id: UUID = Path(..., description="UUID do cliente"),
     client_data: ClientUpdate = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -334,7 +334,7 @@ async def update_client(
 )
 async def delete_client(
     client_id: UUID = Path(..., description="UUID do cliente"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

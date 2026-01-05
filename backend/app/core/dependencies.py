@@ -2,11 +2,12 @@
 Injeção de Dependências do FastAPI.
 Inclui a função crítica para obter o Tenant a partir do header HTTP.
 """
-from fastapi import Header, HTTPException, Depends, status
+from fastapi import Header, HTTPException, Depends, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from uuid import UUID
+from datetime import datetime, timedelta
 from app.core.database import get_db
 from app.models.tenant import Tenant
 from app.models.user import User, UserRole
@@ -298,4 +299,73 @@ async def get_super_admin_user(
         )
     
     return current_user
+
+
+async def verify_subscription_access(
+    tenant: Tenant = Depends(get_current_active_tenant)
+) -> Tenant:
+    """
+    Middleware de verificação de assinatura.
+    
+    Verifica se o tenant tem assinatura ativa antes de permitir acesso às rotas.
+    
+    Lógica (em ordem de prioridade):
+    1. PRIORIDADE MÁXIMA: Se is_exempt for True, permite acesso imediatamente (isento de pagamento)
+    2. Se subscription_status for 'active', permite acesso
+    3. Se subscription_status não for 'active' E a data atual for maior que 
+       current_period_end + 3 dias (carência), bloqueia com erro 402 Payment Required
+    4. Se estiver dentro do período de carência (até 3 dias após current_period_end), permite acesso
+    
+    IMPORTANTE: Esta dependência deve ser aplicada em todas as rotas administrativas,
+    EXCETO nas rotas de autenticação (login, register) e pagamento (billing).
+    
+    Exemplo de uso:
+        @router.get("/admin/services")
+        async def list_services(
+            tenant: Tenant = Depends(verify_subscription_access),
+            db: AsyncSession = Depends(get_db)
+        ):
+            # Só chega aqui se a assinatura estiver ativa ou dentro da carência
+            ...
+    
+    Args:
+        tenant: Tenant autenticado (injetado via get_current_active_tenant)
+        
+    Returns:
+        Tenant: Tenant com assinatura válida
+        
+    Raises:
+        HTTPException 402: Se a assinatura não estiver ativa e estiver fora do período de carência
+    """
+    # PRIORIDADE 1: Verificar se o tenant está isento de pagamento
+    # Se is_exempt for True, permite acesso imediatamente (antes de qualquer verificação)
+    if tenant.is_exempt:
+        return tenant
+    
+    # PRIORIDADE 2: Se o status for 'active', permite acesso imediatamente
+    if tenant.subscription_status == 'active':
+        return tenant
+    
+    # Se não houver current_period_end definido, permite acesso (tenant novo ou sem assinatura configurada)
+    if not tenant.current_period_end:
+        # Se está em trial e ainda não expirou, permite
+        if tenant.trial_ends_at and datetime.utcnow() <= tenant.trial_ends_at:
+            return tenant
+        # Se não tem período definido e não está em trial, permite acesso (será bloqueado quando configurar)
+        return tenant
+    
+    # Calcular data limite (current_period_end + 3 dias de carência)
+    grace_period_end = tenant.current_period_end + timedelta(days=3)
+    current_time = datetime.utcnow()
+    
+    # Se ainda está dentro do período de carência, permite acesso
+    if current_time <= grace_period_end:
+        return tenant
+    
+    # Se passou do período de carência e não está ativo, bloqueia acesso
+    raise HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        detail="Assinatura inativa ou expirada. Por favor, renove sua assinatura para continuar usando o sistema.",
+        headers={"X-Subscription-Status": tenant.subscription_status or "unknown"}
+    )
 

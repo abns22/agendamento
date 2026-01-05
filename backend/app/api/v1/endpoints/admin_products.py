@@ -8,7 +8,7 @@ from uuid import UUID
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.product import Product
 from app.models.product_category import ProductCategory
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/admin/products", tags=["Admin - Products"])
 )
 async def create_product(
     product_data: ProductCreate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Cria um novo produto."""
@@ -80,7 +80,7 @@ async def create_product(
 async def list_products(
     category_id: Optional[UUID] = Query(None, description="Filtrar por categoria"),
     search: Optional[str] = Query(None, description="Buscar por nome"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Lista todos os produtos do tenant autenticado."""
@@ -109,7 +109,7 @@ async def list_products(
 )
 async def get_product(
     product_id: UUID = Path(..., description="UUID do produto"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Obtém um produto específico."""
@@ -140,7 +140,7 @@ async def get_product(
 async def update_product(
     update_data: ProductUpdate,
     product_id: UUID = Path(..., description="UUID do produto"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Atualiza um produto existente."""
@@ -202,7 +202,7 @@ async def update_product(
 )
 async def delete_product(
     product_id: UUID = Path(..., description="UUID do produto"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Deleta um produto existente."""

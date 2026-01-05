@@ -1,7 +1,8 @@
 """
 Modelo SQLAlchemy para a entidade Tenant (Empresa).
 """
-from sqlalchemy import Column, String, Boolean, Text, Integer
+from sqlalchemy import Column, String, Boolean, Text, Integer, DateTime
+from datetime import datetime
 import uuid
 from app.core.database import Base
 
@@ -18,6 +19,11 @@ class Tenant(Base):
     whatsapp_phone_id = Column(String(50), nullable=True)  # ID do número WhatsApp Business na Meta API
     notification_phone_number = Column(String(20), nullable=True)  # Número do estúdio para receber notificações (formato internacional)
     stripe_subscription_id = Column(String(100), nullable=True)
+    stripe_customer_id = Column(String(100), nullable=True, index=True)  # ID do cliente no Stripe
+    subscription_status = Column(String(50), default='pending', nullable=False, index=True)  # Status: 'active', 'past_due', 'canceled', 'pending', 'trialing'
+    current_period_end = Column(DateTime, nullable=True)  # Data final do ciclo atual da assinatura
+    trial_ends_at = Column(DateTime, nullable=True)  # Data de término do período de trial (opcional)
+    is_exempt = Column(Boolean, default=False, nullable=False, index=True)  # Se True, tenant está isento de pagamento
     is_active = Column(Boolean, default=True, nullable=False)
     
     # Campos públicos para personalização da página de agendamento

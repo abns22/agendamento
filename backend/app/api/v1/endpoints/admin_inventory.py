@@ -9,7 +9,7 @@ from typing import List
 from decimal import Decimal
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.product import Product
 from app.models.product_category import ProductCategory
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/admin/inventory", tags=["Admin - Inventory"])
     description="Retorna o resumo completo do inventário com quantidades e valores totais."
 )
 async def get_inventory_summary(
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -113,7 +113,7 @@ async def get_inventory_summary(
 )
 async def list_stock_entries(
     product_id: UUID = None,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Lista todas as entradas de estoque."""
@@ -168,7 +168,7 @@ async def list_stock_entries(
 )
 async def create_stock_entry(
     entry_data: StockEntryCreate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Cria uma nova entrada de estoque."""
@@ -210,7 +210,7 @@ async def create_stock_entry(
 async def update_stock_entry(
     update_data: StockEntryUpdate,
     entry_id: UUID = Path(..., description="UUID da entrada de estoque"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Atualiza uma entrada de estoque existente."""
@@ -258,7 +258,7 @@ async def update_stock_entry(
 )
 async def delete_stock_entry(
     entry_id: UUID = Path(..., description="UUID da entrada de estoque"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Deleta uma entrada de estoque existente."""

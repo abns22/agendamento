@@ -73,12 +73,26 @@ async def get_billing_status(
                 detail="Tenant não encontrado"
             )
         
+        # Verificar se tenant está isento (prioridade máxima)
+        is_exempt = tenant.is_exempt
+        
+        # Se estiver isento, considerar sempre ativo
+        if is_exempt:
+            return BillingStatusResponse(
+                is_active=True,
+                has_subscription=bool(tenant.stripe_subscription_id),
+                subscription_id=tenant.stripe_subscription_id,
+                subscription_status=tenant.subscription_status,
+                current_period_end=None,  # Não relevante para isentos
+                is_exempt=True
+            )
+        
         # Verificar se tem assinatura
         has_subscription = bool(tenant.stripe_subscription_id)
         is_active = tenant.is_active
         
         # Se tiver assinatura e Stripe configurado, buscar status detalhado
-        subscription_status = None
+        subscription_status = tenant.subscription_status  # Usar status do banco como fallback
         current_period_end = None
         
         if has_subscription and settings.STRIPE_SECRET_KEY:
@@ -96,13 +110,18 @@ async def get_billing_status(
             except Exception as e:
                 # Se houver erro ao consultar Stripe, usar status do banco
                 logger.warning(f"Erro ao consultar status no Stripe: {str(e)}")
+                # Usar current_period_end do banco se disponível
+                if tenant.current_period_end:
+                    import time
+                    current_period_end = int(time.mktime(tenant.current_period_end.timetuple()))
         
         return BillingStatusResponse(
             is_active=is_active,
             has_subscription=has_subscription,
             subscription_id=tenant.stripe_subscription_id,
             subscription_status=subscription_status,
-            current_period_end=current_period_end
+            current_period_end=current_period_end,
+            is_exempt=False
         )
         
     except HTTPException:
@@ -197,13 +216,23 @@ async def create_checkout_session(
         stripe_service = StripeService()
         
         # Criar checkout session
+        # O StripeService irá criar ou recuperar o customer automaticamente
         checkout_data = stripe_service.create_checkout_session(
             tenant_id=UUID(tenant.id),
             plan_price_id=settings.STRIPE_PRICE_ID,
             success_url=success_url,
             cancel_url=cancel_url,
-            customer_email=current_user.email
+            customer_id=tenant.stripe_customer_id,  # Passar customer_id se já existir
+            customer_email=current_user.email,
+            customer_name=tenant.name or current_user.email.split('@')[0]  # Usar nome do tenant ou email
         )
+        
+        # Salvar stripe_customer_id no banco se foi criado/recuperado
+        if checkout_data.get('customer_id') and checkout_data['customer_id'] != tenant.stripe_customer_id:
+            tenant.stripe_customer_id = checkout_data['customer_id']
+            await db.commit()
+            await db.refresh(tenant)
+            logger.info(f"stripe_customer_id salvo para tenant {tenant.id}: {checkout_data['customer_id']}")
         
         return CreateCheckoutSessionResponse(
             checkout_url=checkout_data['url'],

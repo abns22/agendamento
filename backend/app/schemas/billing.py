@@ -75,6 +75,7 @@ class BillingStatusResponse(BaseModel):
     subscription_id: Optional[str] = Field(None, description="ID da assinatura no Stripe (se existir)")
     subscription_status: Optional[str] = Field(None, description="Status da assinatura no Stripe (active, canceled, etc)")
     current_period_end: Optional[int] = Field(None, description="Timestamp do fim do período atual (se existir)")
+    is_exempt: bool = Field(default=False, description="Se True, tenant está isento de pagamento")
     
     class Config:
         json_schema_extra = {

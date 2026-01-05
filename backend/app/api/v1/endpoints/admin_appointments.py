@@ -14,7 +14,7 @@ from decimal import Decimal
 import uuid
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.appointment import Appointment, AppointmentStatus
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
@@ -113,7 +113,7 @@ async def build_appointment_response(
 )
 async def get_availability(
     date: str = Query(..., description="Data no formato YYYY-MM-DD"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -194,7 +194,7 @@ async def count_future_appointments(
         default=None,
         description="Número de dias para buscar (opcional, usa notification_days do tenant se não fornecido)"
     ),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -291,7 +291,7 @@ async def list_appointments(
     date: Optional[str] = Query(None, description="Data para filtrar (YYYY-MM-DD). Se não fornecido, retorna todos os agendamentos."),
     status: Optional[str] = Query(None, description="Status para filtrar (SCHEDULED, CONFIRMED, COMPLETED, CANCELED)."),
     service_id: Optional[UUID] = Query(None, description="ID do serviço para filtrar."),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -385,7 +385,7 @@ async def list_appointments(
 )
 async def get_appointment(
     appointment_id: UUID = Path(..., description="UUID do agendamento"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -434,7 +434,7 @@ async def get_appointment(
 async def update_appointment(
     appointment_id: UUID = Path(..., description="UUID do agendamento"),
     update_data: AppointmentUpdate = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -500,7 +500,7 @@ async def update_appointment(
 async def finalize_appointment(
     appointment_id: UUID = Path(..., description="UUID do agendamento"),
     finalize_data: FinalizeAppointmentRequest = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -640,7 +640,7 @@ async def finalize_appointment(
 async def cancel_appointment(
     appointment_id: UUID = Path(..., description="UUID do agendamento"),
     cancel_data: AppointmentCancelRequest = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db),
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
@@ -783,7 +783,7 @@ async def cancel_appointment(
 async def reschedule_appointment(
     appointment_id: UUID = Path(..., description="UUID do agendamento"),
     reschedule_data: AppointmentRescheduleRequest = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -989,7 +989,7 @@ async def reschedule_appointment(
 )
 async def create_manual_appointment(
     appointment_data: ManualAppointmentCreate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

@@ -45,6 +45,7 @@ class TenantResponse(TenantBase):
     """Schema de resposta para Tenant."""
     id: UUID
     is_active: bool
+    is_exempt: bool = Field(default=False, description="Se True, tenant está isento de pagamento")
     
     class Config:
         from_attributes = True

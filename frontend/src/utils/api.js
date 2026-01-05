@@ -45,7 +45,7 @@ api.interceptors.request.use(
   }
 )
 
-// Interceptor para tratar erros de autenticação
+// Interceptor para tratar erros de autenticação e pagamento
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -62,6 +62,16 @@ api.interceptors.response.use(
       if (currentPath !== '/admin/login' && !currentPath.startsWith('/admin/login')) {
         // Usar replace para evitar adicionar ao histórico
         window.location.replace('/admin/login')
+      }
+    }
+    
+    // Se receber 402 (Payment Required), redirecionar para página de pagamento
+    if (error.response?.status === 402) {
+      const currentPath = window.location.pathname
+      // Evitar loop de redirecionamento
+      if (currentPath !== '/admin/pagamento' && !currentPath.startsWith('/admin/pagamento')) {
+        // Usar replace para evitar adicionar ao histórico
+        window.location.replace('/admin/pagamento')
       }
     }
     

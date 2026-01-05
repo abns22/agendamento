@@ -9,7 +9,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.expense import Expense
 
@@ -28,7 +28,7 @@ async def list_expenses(
     start_date: Optional[str] = Query(None, description="Data inicial (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="Data final (YYYY-MM-DD)"),
     category: Optional[str] = Query(None, description="Filtrar por categoria"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -90,7 +90,7 @@ async def list_expenses(
 )
 async def create_expense(
     expense_data: ExpenseCreate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -139,7 +139,7 @@ async def create_expense(
 )
 async def get_expense(
     expense_id: UUID = Path(..., description="UUID da despesa"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -187,7 +187,7 @@ async def get_expense(
 async def update_expense(
     expense_id: UUID = Path(..., description="UUID da despesa"),
     update_data: ExpenseUpdate = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -252,7 +252,7 @@ async def update_expense(
 )
 async def delete_expense(
     expense_id: UUID = Path(..., description="UUID da despesa"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

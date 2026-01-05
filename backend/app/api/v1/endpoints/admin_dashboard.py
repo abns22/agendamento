@@ -9,7 +9,7 @@ from typing import Optional
 from decimal import Decimal
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.appointment import Appointment, AppointmentStatus
 from app.models.service import Service
@@ -34,7 +34,7 @@ class DashboardStatsResponse(BaseModel):
     description="Retorna estatísticas resumidas para o dashboard do tenant autenticado."
 )
 async def get_dashboard_stats(
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -125,7 +125,7 @@ async def get_dashboard_summary(
         None,
         description="Data de fim no formato YYYY-MM-DD (opcional, padrão: último dia do mês atual)"
     ),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

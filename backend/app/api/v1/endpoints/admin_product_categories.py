@@ -8,7 +8,7 @@ from uuid import UUID
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.product_category import ProductCategory
 from app.schemas.product_category import (
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/admin/product-categories", tags=["Admin - Product Ca
 )
 async def create_category(
     category_data: ProductCategoryCreate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Cria uma nova categoria de produto."""
@@ -50,7 +50,7 @@ async def create_category(
     description="Retorna todas as categorias de produtos do tenant autenticado."
 )
 async def list_categories(
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Lista todas as categorias do tenant autenticado."""
@@ -72,7 +72,7 @@ async def list_categories(
 )
 async def get_category(
     category_id: UUID = Path(..., description="UUID da categoria"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Obtém uma categoria específica."""
@@ -103,7 +103,7 @@ async def get_category(
 async def update_category(
     update_data: ProductCategoryUpdate,
     category_id: UUID = Path(..., description="UUID da categoria"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Atualiza uma categoria existente."""
@@ -139,7 +139,7 @@ async def update_category(
 )
 async def delete_category(
     category_id: UUID = Path(..., description="UUID da categoria"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """Deleta uma categoria existente."""

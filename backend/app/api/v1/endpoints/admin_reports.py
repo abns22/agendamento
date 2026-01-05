@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.transaction import Transaction
 from app.models.payment_entry import PaymentEntry
@@ -41,7 +41,7 @@ router = APIRouter(prefix="/admin/reports", tags=["Admin - Reports"])
 async def get_cash_summary(
     start_date: Optional[str] = Query(None, description="Data de início no formato YYYY-MM-DD. Se não fornecido, usa hoje."),
     end_date: Optional[str] = Query(None, description="Data de fim no formato YYYY-MM-DD. Se não fornecido, usa hoje."),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -289,7 +289,7 @@ async def list_transactions(
     end_date: Optional[str] = Query(None, description="Data final (YYYY-MM-DD)"),
     customer_name: Optional[str] = Query(None, description="Filtrar por nome do cliente"),
     payment_method_id: Optional[UUID] = Query(None, description="Filtrar por forma de pagamento"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -462,7 +462,7 @@ async def list_transactions(
 )
 async def get_birthdays(
     month: Optional[int] = Query(None, description="Mês (1-12). Se não fornecido, usa o mês atual."),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

@@ -11,7 +11,7 @@ from uuid import UUID
 from typing import Annotated, List, Dict, Any
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.service import Service
 
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/admin/services", tags=["Admin - Services"])
     description="Retorna todos os serviços do tenant autenticado."
 )
 async def list_services(
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -98,7 +98,7 @@ async def list_services(
 )
 async def get_service(
     service_id: UUID = Path(..., description="UUID do serviço"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -161,7 +161,7 @@ async def get_service(
 )
 async def create_service(
     service_data: ServiceCreate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -231,7 +231,7 @@ async def create_service(
 async def update_service(
     service_id: UUID = Path(..., description="UUID do serviço"),
     service_data: ServiceUpdate = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -313,7 +313,7 @@ async def update_service(
 )
 async def delete_service(
     service_id: UUID = Path(..., description="UUID do serviço"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

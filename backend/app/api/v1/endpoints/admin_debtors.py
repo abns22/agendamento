@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.debtor import Debtor, DebtorStatus
 from app.models.transaction import Transaction
@@ -33,7 +33,7 @@ router = APIRouter(prefix="/admin/debtors", tags=["Admin - Debtors"])
 )
 async def list_debtors(
     status: str = None,  # 'PENDING' ou 'PAID'
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -89,7 +89,7 @@ async def list_debtors(
 )
 async def get_debtor(
     debtor_id: UUID = Path(..., description="UUID do devedor"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -147,7 +147,7 @@ async def get_debtor(
 async def settle_debtor(
     debtor_id: UUID = Path(..., description="UUID do devedor"),
     settle_data: SettleDebtorRequest = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

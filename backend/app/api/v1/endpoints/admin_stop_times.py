@@ -11,7 +11,7 @@ from uuid import UUID
 from typing import Annotated, List
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.stop_time import StopTime
 
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/admin/stop-times", tags=["Admin - Stop Times"])
     description="Retorna todos os intervalos de parada/almoço do tenant autenticado."
 )
 async def list_stop_times(
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -62,7 +62,7 @@ async def list_stop_times(
 )
 async def get_stop_time(
     stop_time_id: UUID = Path(..., description="UUID do intervalo de parada"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -110,7 +110,7 @@ async def get_stop_time(
 )
 async def create_stop_time(
     stop_time_data: StopTimeCreate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -160,7 +160,7 @@ async def create_stop_time(
 async def update_stop_time(
     stop_time_id: UUID = Path(..., description="UUID do intervalo de parada"),
     stop_time_data: StopTimeUpdate = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -227,7 +227,7 @@ async def update_stop_time(
 )
 async def delete_stop_time(
     stop_time_id: UUID = Path(..., description="UUID do intervalo de parada"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

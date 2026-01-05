@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Annotated, Optional
 from uuid import UUID
+from datetime import datetime
 import stripe
 import logging
 
@@ -17,13 +18,13 @@ from app.core.database import get_db
 from app.core.config import settings
 from app.models.tenant import Tenant
 
-router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+router = APIRouter(prefix="/payments", tags=["Webhooks"])
 
 logger = logging.getLogger(__name__)
 
 
 @router.post(
-    "/stripe",
+    "/webhook",
     status_code=200,
     summary="Webhook do Stripe",
     description="Recebe eventos do Stripe sobre pagamentos e assinaturas. Rota pública sem autenticação."
@@ -46,10 +47,9 @@ async def stripe_webhook(
     4. Processa o evento conforme o tipo
     
     Eventos processados:
-    - checkout.session.completed: Pagamento inicial concluído
-    - customer.subscription.deleted: Assinatura cancelada
-    - invoice.payment_succeeded: Renovação paga com sucesso
-    - invoice.payment_failed: Pagamento falhou
+    - checkout.session.completed: Pagamento inicial concluído (atualiza subscription_status='active' e current_period_end)
+    - invoice.paid: Renovação paga com sucesso (atualiza current_period_end)
+    - invoice.payment_failed: Pagamento falhou (atualiza subscription_status='past_due')
     
     Args:
         request: Objeto Request do FastAPI (para acessar body raw)
@@ -112,14 +112,14 @@ async def stripe_webhook(
             case 'checkout.session.completed':
                 await handle_checkout_session_completed(event_data, db)
             
-            case 'customer.subscription.deleted':
-                await handle_subscription_deleted(event_data, db)
-            
-            case 'invoice.payment_succeeded':
-                await handle_invoice_payment_succeeded(event_data, db)
+            case 'invoice.paid':
+                await handle_invoice_paid(event_data, db)
             
             case 'invoice.payment_failed':
                 await handle_invoice_payment_failed(event_data, db)
+            
+            case 'customer.subscription.deleted':
+                await handle_subscription_deleted(event_data, db)
             
             case _:
                 # Evento não processado, mas não é erro
@@ -150,7 +150,9 @@ async def handle_checkout_session_completed(
     
     Quando o pagamento inicial é concluído, atualiza o tenant com:
     - stripe_subscription_id
-    - is_active = True
+    - subscription_status = 'active'
+    - current_period_end (da subscription)
+    - stripe_customer_id (se disponível)
     
     Args:
         session_data: Dados da sessão de checkout do Stripe
@@ -179,7 +181,7 @@ async def handle_checkout_session_completed(
             logger.error(f"tenant_id inválido: {tenant_id_str}")
             return
         
-        # Buscar tenant (MySQL armazena UUIDs como String(36))
+        # Buscar tenant
         result = await db.execute(
             select(Tenant).where(Tenant.id == tenant_id_str)
         )
@@ -189,14 +191,30 @@ async def handle_checkout_session_completed(
             logger.error(f"Tenant não encontrado: {tenant_id_str}")
             return
         
+        # Buscar dados da subscription no Stripe para obter current_period_end
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+        try:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            current_period_end = datetime.fromtimestamp(subscription.current_period_end)
+            customer_id = subscription.customer
+        except stripe.error.StripeError as e:
+            logger.error(f"Erro ao buscar subscription no Stripe: {str(e)}")
+            # Continuar mesmo sem os dados da subscription
+            current_period_end = None
+            customer_id = session_data.get('customer')
+        
         # Atualizar tenant
         tenant.stripe_subscription_id = subscription_id
-        tenant.is_active = True
+        tenant.subscription_status = 'active'
+        if current_period_end:
+            tenant.current_period_end = current_period_end
+        if customer_id and not tenant.stripe_customer_id:
+            tenant.stripe_customer_id = customer_id
         
         await db.commit()
         await db.refresh(tenant)
         
-        logger.info(f"Tenant {tenant_id_str} ativado com subscription {subscription_id}")
+        logger.info(f"Tenant {tenant_id_str} ativado com subscription {subscription_id}, status='active', period_end={current_period_end}")
         
     except Exception as e:
         await db.rollback()
@@ -204,14 +222,16 @@ async def handle_checkout_session_completed(
         raise
 
 
-async def handle_invoice_payment_succeeded(
+async def handle_invoice_paid(
     invoice_data: dict,
     db: AsyncSession
 ):
     """
-    Processa evento invoice.payment_succeeded.
+    Processa evento invoice.paid.
     
-    Quando uma renovação é paga com sucesso, ativa o tenant se estava inativo.
+    Quando uma renovação é paga com sucesso, atualiza:
+    - current_period_end (nova data do período)
+    - subscription_status = 'active' (garantir que está ativo)
     
     Args:
         invoice_data: Dados da invoice do Stripe
@@ -235,18 +255,33 @@ async def handle_invoice_payment_succeeded(
             logger.warning(f"Tenant não encontrado para subscription {subscription_id}")
             return
         
-        # Ativar tenant se estava inativo
-        if not tenant.is_active:
-            tenant.is_active = True
-            await db.commit()
-            await db.refresh(tenant)
-            logger.info(f"Tenant {tenant.id} reativado após pagamento bem-sucedido")
-        else:
-            logger.info(f"Tenant {tenant.id} já estava ativo")
+        # Buscar dados da subscription no Stripe para obter current_period_end
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+        try:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            current_period_end = datetime.fromtimestamp(subscription.current_period_end)
+        except stripe.error.StripeError as e:
+            logger.error(f"Erro ao buscar subscription no Stripe: {str(e)}")
+            # Tentar usar period_end da invoice se disponível
+            period_end = invoice_data.get('period_end')
+            if period_end:
+                current_period_end = datetime.fromtimestamp(period_end)
+            else:
+                current_period_end = None
+        
+        # Atualizar tenant
+        tenant.subscription_status = 'active'
+        if current_period_end:
+            tenant.current_period_end = current_period_end
+        
+        await db.commit()
+        await db.refresh(tenant)
+        
+        logger.info(f"Tenant {tenant.id} renovação paga, atualizado period_end={current_period_end}")
         
     except Exception as e:
         await db.rollback()
-        logger.error(f"Erro ao processar invoice.payment_succeeded: {str(e)}", exc_info=True)
+        logger.error(f"Erro ao processar invoice.paid: {str(e)}", exc_info=True)
         raise
 
 
@@ -301,8 +336,11 @@ async def handle_invoice_payment_failed(
     """
     Processa evento invoice.payment_failed.
     
-    Quando um pagamento falha, desativa o tenant.
-    Pode iniciar um período de carência (implementação futura).
+    Quando um pagamento falha, atualiza:
+    - subscription_status = 'past_due'
+    
+    O tenant ainda terá acesso durante o período de carência (3 dias após current_period_end)
+    conforme implementado no middleware verify_subscription_access.
     
     Args:
         invoice_data: Dados da invoice do Stripe
@@ -326,15 +364,13 @@ async def handle_invoice_payment_failed(
             logger.warning(f"Tenant não encontrado para subscription {subscription_id}")
             return
         
-        # Desativar tenant (pagamento falhou)
-        tenant.is_active = False
+        # Atualizar status para past_due (não desativar imediatamente)
+        tenant.subscription_status = 'past_due'
+        
         await db.commit()
         await db.refresh(tenant)
         
-        logger.info(f"Tenant {tenant.id} desativado devido a falha no pagamento")
-        
-        # TODO: Implementar período de carência (grace period)
-        # Por exemplo, dar alguns dias antes de desativar completamente
+        logger.info(f"Tenant {tenant.id} status atualizado para 'past_due' devido a falha no pagamento")
         
     except Exception as e:
         await db.rollback()

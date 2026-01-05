@@ -8,7 +8,7 @@ from uuid import UUID
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_tenant
+from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.payment_method_config import PaymentMethodConfig
 from app.models.payment_installment_config import PaymentInstallmentConfig, TaxType
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/admin/payment-config", tags=["Admin - Payment Config
     description="Retorna todas as formas de pagamento configuradas do tenant autenticado."
 )
 async def list_payment_methods(
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -132,7 +132,7 @@ async def list_payment_methods(
 )
 async def create_payment_method(
     method_data: PaymentMethodConfigCreate,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -190,7 +190,7 @@ async def create_payment_method(
 async def update_payment_method(
     method_id: UUID = Path(..., description="UUID da forma de pagamento"),
     update_data: PaymentMethodConfigUpdate = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -265,7 +265,7 @@ async def update_payment_method(
 )
 async def list_installments(
     method_id: UUID = Path(..., description="UUID da forma de pagamento"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -319,7 +319,7 @@ async def list_installments(
 async def create_installment(
     method_id: UUID = Path(..., description="UUID da forma de pagamento"),
     installment_data: PaymentInstallmentConfigCreate = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -403,7 +403,7 @@ async def create_installment(
 async def update_installment(
     installment_id: UUID = Path(..., description="UUID da configuração de parcelamento"),
     update_data: PaymentInstallmentConfigUpdate = ...,
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -476,7 +476,7 @@ async def update_installment(
 )
 async def delete_installment(
     installment_id: UUID = Path(..., description="UUID da configuração de parcelamento"),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """

@@ -12,7 +12,7 @@ from datetime import time
 import logging
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_admin_user, get_current_active_tenant
+from app.core.dependencies import get_current_admin_user, verify_subscription_access
 from app.models.tenant import Tenant
 from app.models.schedule_config import ScheduleConfig
 from app.models.user import User
@@ -42,7 +42,7 @@ def format_slug_as_company_name(slug: str) -> str:
 )
 async def get_tenant_config(
     current_user: User = Depends(get_current_admin_user),
-    tenant: Tenant = Depends(get_current_active_tenant),
+    tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -55,7 +55,7 @@ async def get_tenant_config(
     
     Args:
         current_user: Usuário autenticado (injetado via get_current_admin_user)
-        tenant: Tenant autenticado (injetado via get_current_active_tenant)
+        tenant: Tenant autenticado (injetado via verify_subscription_access)
         db: Sessão do banco de dados
         
     Returns:
