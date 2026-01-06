@@ -414,7 +414,9 @@ const AgendaPage = () => {
   // Abrir modal de bloqueio
   const handleOpenBlockModal = () => {
     // Preencher com horário padrão (próxima hora)
-    const now = new Date(selectedDate)
+    // Usar startDate se disponível, senão usar data atual
+    const baseDate = startDate || new Date()
+    const now = new Date(baseDate)
     now.setHours(now.getHours() + 1, 0, 0, 0)
     const endTime = new Date(now)
     endTime.setHours(endTime.getHours() + 1)
@@ -796,10 +798,17 @@ const AgendaPage = () => {
           <div className="text-center py-12">
             <div className="text-6xl mb-4">📅</div>
             <h3 className="text-lg font-semibold text-text mb-2">
-              Nenhum agendamento neste dia
+              Nenhum agendamento encontrado
             </h3>
             <p className="text-gray-600 mb-6">
-              {format(selectedDate, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+              {daysAhead 
+                ? `Nos próximos ${daysAhead} dia(s)`
+                : startDate && endDate
+                  ? `De ${format(startDate, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })} até ${format(endDate, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}`
+                  : startDate
+                    ? `A partir de ${format(startDate, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}`
+                    : 'Neste período'
+              }
             </p>
             <Button onClick={handleOpenBlockModal} variant="primary">
               Marcar Horário Manualmente

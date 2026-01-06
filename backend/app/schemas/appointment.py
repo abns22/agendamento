@@ -157,8 +157,8 @@ class AppointmentRescheduleRequest(BaseModel):
 
 class AppointmentUpdate(BaseModel):
     """Schema para atualização de um agendamento existente."""
-    status: Optional[str] = Field(None, description="Novo status do agendamento (PENDING, CONFIRMED, CANCELED, COMPLETED)")
-    start_datetime: Optional[datetime] = Field(None, description="Nova data e hora de início do agendamento (UTC)")
+    status: Optional[str] = Field(default=None, description="Novo status do agendamento (PENDING, CONFIRMED, CANCELED, COMPLETED)")
+    start_datetime: Optional[datetime] = Field(default=None, description="Nova data e hora de início do agendamento (UTC)")
     service_ids: Optional[List[UUID]] = Field(
         default=None,
         min_length=1,

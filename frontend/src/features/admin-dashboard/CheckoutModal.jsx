@@ -44,28 +44,51 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
   useEffect(() => {
     if (isOpen && services.length > 0) {
       calculateGrossValue()
-      // Inicializar valueDue como vazio quando pagamento é à vista
-      // Só será preenchido se o usuário marcar como "a prazo"
-      if (!isPaid) {
+      // Se não há entradas de pagamento e é pagamento à vista, criar uma
+      if (isPaid && paymentEntries.length === 0) {
         const totalValue = calculateTotalValueFromServices()
-        setValueDue(totalValue.toFixed(2))
-        // Limpar entradas de pagamento quando mudar para conta a receber
-        setPaymentEntries([])
-      } else {
+        setPaymentEntries([{
+          payment_method_id: '',
+          value_paid: totalValue.toFixed(2),
+          installments: 1
+        }])
         setValueDue('')
-        // Se não há entradas de pagamento e é pagamento à vista, criar uma
-        if (paymentEntries.length === 0) {
-          const totalValue = calculateTotalValueFromServices()
-          setPaymentEntries([{
-            payment_method_id: '',
-            value_paid: totalValue.toFixed(2),
-            installments: 1
-          }])
-        }
+      } else if (!isPaid) {
+        // Se mudou para conta a receber, calcular o valor devido automaticamente
+        // (será atualizado quando os pagamentos mudarem)
+        updateValueDueFromPayments()
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, services, isPaid])
+  
+  // Atualizar valueDue automaticamente quando os pagamentos mudarem (se for conta a receber)
+  useEffect(() => {
+    if (!isPaid && isOpen) {
+      updateValueDueFromPayments()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentEntries, isPaid, isOpen])
+  
+  // Função para calcular e atualizar valueDue baseado nos pagamentos
+  const updateValueDueFromPayments = () => {
+    const finalValue = calculateFinalValue()
+    const totalPaid = calculateTotalPaid()
+    const remaining = finalValue - totalPaid
+    
+    if (remaining > 0) {
+      setValueDue(remaining.toFixed(2))
+    } else {
+      setValueDue('0.00')
+    }
+  }
+  
+  // Calcular valor total pago
+  const calculateTotalPaid = () => {
+    return paymentEntries.reduce((sum, entry) => {
+      return sum + parseFloat(entry.value_paid || 0)
+    }, 0)
+  }
   
   // Preencher dados do cliente automaticamente quando abrir modal ou quando isPaid mudar para false
   useEffect(() => {
@@ -170,16 +193,13 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     setGrossValue(totalValue)
     
     // Inicializar com uma entrada de pagamento vazia apenas se for pagamento à vista
-    // Se for conta a receber (isPaid === false), não criar entrada de pagamento
+    // Se for conta a receber, manter as entradas existentes (permitir pagamento parcial)
     if (paymentEntries.length === 0 && isPaid) {
       setPaymentEntries([{
         payment_method_id: '',
         value_paid: totalValue.toFixed(2),
         installments: 1
       }])
-    } else if (!isPaid && paymentEntries.length > 0) {
-      // Se mudou para conta a receber, limpar entradas de pagamento
-      setPaymentEntries([])
     }
   }
   
@@ -199,12 +219,6 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     const updated = [...paymentEntries]
     updated[index] = { ...updated[index], [field]: value }
     setPaymentEntries(updated)
-  }
-  
-  const calculateTotalPaid = () => {
-    return paymentEntries.reduce((sum, entry) => {
-      return sum + parseFloat(entry.value_paid || 0)
-    }, 0)
   }
   
   // Calcular valor final após desconto
@@ -474,14 +488,8 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
           )}
         </div>
         
-        {/* Formas de Pagamento - Ocultar se for conta a receber total */}
-        {(() => {
-          const finalValueAfterDiscount = calculateFinalValue()
-          const hasValueDue = valueDue && parseFloat(valueDue) > 0
-          const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
-          const isFullAccountsReceivable = !isPaid && hasValueDue && Math.abs(valueDueNum - finalValueAfterDiscount) < 0.01
-          return !isFullAccountsReceivable
-        })() && (
+        {/* Formas de Pagamento - Sempre mostrar (permite pagamento parcial + conta a receber) */}
+        {(
         <div>
           <div className="flex justify-between items-center mb-3">
             <label className="block text-sm font-semibold text-text">
@@ -713,23 +721,50 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
               
               <div>
                 <label className="block text-sm font-semibold text-text mb-2">
-                  Valor Devido (R$)
+                  Valor Devido (R$) {(() => {
+                    const finalValueAfterDiscount = calculateFinalValue()
+                    const totalPaid = calculateTotalPaid()
+                    const remaining = finalValueAfterDiscount - totalPaid
+                    return remaining > 0 ? `(Restante: ${formatCurrency(remaining)})` : ''
+                  })()}
                 </label>
                 <input
                   type="number"
                   min="0"
                   step="0.01"
-                  max={grossValue}
                   value={valueDue}
-                  onChange={(e) => setValueDue(e.target.value)}
-                  placeholder={finalValueAfterDiscount.toFixed(2)}
-                  max={finalValueAfterDiscount}
+                  onChange={(e) => {
+                    const newValue = e.target.value
+                    setValueDue(newValue)
+                  }}
+                  onBlur={() => {
+                    // Ao sair do campo, atualizar para o valor restante se estiver vazio ou inválido
+                    const finalValueAfterDiscount = calculateFinalValue()
+                    const totalPaid = calculateTotalPaid()
+                    const remaining = finalValueAfterDiscount - totalPaid
+                    const currentValue = parseFloat(valueDue) || 0
+                    
+                    // Se o valor atual não corresponde ao restante, atualizar
+                    if (Math.abs(currentValue - remaining) > 0.01 && remaining > 0) {
+                      setValueDue(remaining.toFixed(2))
+                    }
+                  }}
+                  placeholder={(() => {
+                    const finalValueAfterDiscount = calculateFinalValue()
+                    const totalPaid = calculateTotalPaid()
+                    const remaining = finalValueAfterDiscount - totalPaid
+                    return remaining > 0 ? remaining.toFixed(2) : '0.00'
+                  })()}
+                  max={(() => {
+                    const finalValueAfterDiscount = calculateFinalValue()
+                    const totalPaid = calculateTotalPaid()
+                    return finalValueAfterDiscount - totalPaid
+                  })()}
                   className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary"
                   disabled={isSubmitting}
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Deixe vazio ou preencha com o valor final após desconto ({formatCurrency(finalValueAfterDiscount)}) para registrar o valor completo. 
-                  Ou informe um valor parcial se o cliente ficará devendo apenas parte do serviço.
+                  Valor restante após os pagamentos à vista. Será ajustado automaticamente quando você adicionar/remover pagamentos.
                 </p>
               </div>
               

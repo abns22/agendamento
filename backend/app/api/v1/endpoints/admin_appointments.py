@@ -598,7 +598,9 @@ async def update_appointment(
             )
     
     # Determinar qual horário usar (novo ou atual)
-    new_start_datetime = update_data.start_datetime if update_data.start_datetime else appointment.start_datetime
+    # Usar getattr para acessar start_datetime de forma segura
+    update_start_datetime = getattr(update_data, 'start_datetime', None)
+    new_start_datetime = update_start_datetime if update_start_datetime else appointment.start_datetime
     
     # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
     if new_start_datetime.tzinfo is not None:
@@ -614,7 +616,10 @@ async def update_appointment(
     except (AttributeError, TypeError):
         has_service_ids = False
     
-    if update_data.start_datetime or has_service_ids:
+    # Verificar se start_datetime foi fornecido
+    has_start_datetime = update_start_datetime is not None
+    
+    if has_start_datetime or has_service_ids:
         # 1. Calcular soma das durações dos serviços
         total_duration_minutes = 0
         services_to_use = []
