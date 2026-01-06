@@ -27,13 +27,15 @@ from app.schemas.appointment import (
     AppointmentResponse,
     AppointmentCancelRequest,
     ManualAppointmentCreate,
-    AppointmentRescheduleRequest
+    AppointmentRescheduleRequest,
+    AppointmentUpdate
 )
 from app.schemas.transaction import FinalizeAppointmentRequest, FinalizeAppointmentResponse, TransactionResponse
 from app.services.finalization_service import FinalizationService
 from app.services.whatsapp_service import WhatsAppService
 from app.services.availability_service import AvailabilityService
 from app.services.appointment_service import AppointmentService
+from app.services.promotion_service import PromotionService
 from pydantic import BaseModel
 from datetime import timedelta
 
@@ -429,7 +431,7 @@ async def get_appointment(
     "/{appointment_id}",
     response_model=AppointmentResponse,
     summary="Atualizar agendamento",
-    description="Atualiza um agendamento existente (status, horário, etc)."
+    description="Atualiza um agendamento existente (status, horário, serviços). Valida conflitos de horário ao editar."
 )
 async def update_appointment(
     appointment_id: UUID = Path(..., description="UUID do agendamento"),
@@ -438,7 +440,18 @@ async def update_appointment(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Atualiza o status de um agendamento.
+    Atualiza um agendamento existente.
+    
+    Permite atualizar:
+    - Status do agendamento
+    - Horário de início (start_datetime)
+    - Lista de serviços (service_ids)
+    
+    Ao editar horário ou serviços, valida conflitos de disponibilidade:
+    - Calcula a soma das durações dos serviços
+    - Calcula novo horário de fim (start_time + soma_duracoes)
+    - Verifica conflitos com outros agendamentos (excluindo o próprio)
+    - Retorna 409 Conflict se houver conflito
     
     Args:
         appointment_id: UUID do agendamento
@@ -451,13 +464,14 @@ async def update_appointment(
         
     Raises:
         HTTPException 404: Se o agendamento não for encontrado
-        HTTPException 400: Se o status for inválido
+        HTTPException 400: Se os dados forem inválidos
+        HTTPException 409: Se houver conflito de horário
     """
-    # Buscar agendamento
     # IMPORTANTE: Converter tenant_id e appointment_id para strings (MySQL armazena UUIDs como String(36))
     tenant_id_str = str(tenant.id) if tenant.id else None
     appointment_id_str = str(appointment_id) if appointment_id else None
     
+    # Buscar agendamento existente
     result = await db.execute(
         select(Appointment).where(
             and_(
@@ -473,6 +487,142 @@ async def update_appointment(
             status_code=404,
             detail="Agendamento não encontrado"
         )
+    
+    # Não permitir editar agendamentos cancelados ou finalizados
+    if appointment.status == AppointmentStatus.CANCELED:
+        raise HTTPException(
+            status_code=400,
+            detail="Não é possível editar um agendamento cancelado"
+        )
+    
+    if appointment.status == AppointmentStatus.COMPLETED:
+        raise HTTPException(
+            status_code=400,
+            detail="Não é possível editar um agendamento finalizado"
+        )
+    
+    # Determinar quais serviços usar (novos ou atuais)
+    service_ids_to_use = update_data.service_ids if update_data.service_ids else None
+    
+    # Se não foram fornecidos novos service_ids, buscar os atuais
+    if not service_ids_to_use:
+        await db.refresh(appointment, ['services'])
+        if appointment.services:
+            service_ids_to_use = [UUID(str(s.id)) for s in appointment.services]
+        elif appointment.service_id:
+            service_ids_to_use = [UUID(str(appointment.service_id))]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Agendamento não possui serviços associados e nenhum service_ids foi fornecido"
+            )
+    
+    # Determinar qual horário usar (novo ou atual)
+    new_start_datetime = update_data.start_datetime if update_data.start_datetime else appointment.start_datetime
+    
+    # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
+    if new_start_datetime.tzinfo is not None:
+        new_start_datetime = new_start_datetime.replace(tzinfo=None)
+    
+    # VALIDAÇÃO DE CONFLITOS: Se horário ou serviços foram alterados
+    if update_data.start_datetime or update_data.service_ids:
+        # 1. Calcular soma das durações dos serviços
+        total_duration_minutes = 0
+        services_to_use = []
+        total_value = Decimal('0.00')
+        
+        for service_id in service_ids_to_use:
+            service_id_str = str(service_id)
+            service_query = select(Service).where(
+                and_(
+                    Service.id == service_id_str,
+                    Service.tenant_id == tenant_id_str
+                )
+            )
+            service_result = await db.execute(service_query)
+            service = service_result.scalar_one_or_none()
+            
+            if not service:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Serviço não encontrado: {service_id}"
+                )
+            
+            services_to_use.append(service)
+            total_duration_minutes += service.duration_minutes
+            
+            # Calcular valor total (com promoções)
+            effective_price = Decimal(str(PromotionService.get_effective_price(service)))
+            total_value += effective_price
+        
+        # 2. Calcular novo horário de fim
+        new_end_datetime = new_start_datetime + timedelta(minutes=total_duration_minutes)
+        
+        # 3. Buscar conflitos (excluindo o próprio agendamento)
+        # Regra de Ouro: (start_time < novo_fim) AND (end_time > start_time)
+        conflicting_query = select(Appointment).where(
+            and_(
+                Appointment.tenant_id == tenant_id_str,
+                Appointment.id != appointment_id_str,  # Excluir o próprio agendamento
+                Appointment.start_datetime < new_end_datetime,
+                Appointment.end_datetime > new_start_datetime,
+                Appointment.status != AppointmentStatus.CANCELED  # Ignorar cancelados
+            )
+        )
+        conflicting_result = await db.execute(conflicting_query)
+        conflicting_appointments = conflicting_result.scalars().all()
+        
+        # 4. Se houver conflito, retornar 409 Conflict
+        if conflicting_appointments:
+            raise HTTPException(
+                status_code=409,
+                detail="O tempo total dos serviços selecionados ultrapassa o horário disponível até o próximo agendamento."
+            )
+        
+        # 5. Se não houver conflito, atualizar dados
+        appointment.start_datetime = new_start_datetime
+        appointment.end_datetime = new_end_datetime
+        appointment.total_value = total_value
+        
+        # Atualizar relacionamento com serviços
+        # Primeiro, remover serviços antigos
+        await db.refresh(appointment, ['services'])
+        if appointment.services:
+            for old_service in appointment.services:
+                # Buscar e deletar AppointmentService
+                appointment_service_query = select(AppointmentServiceModel).where(
+                    and_(
+                        AppointmentServiceModel.appointment_id == appointment_id_str,
+                        AppointmentServiceModel.service_id == str(old_service.id)
+                    )
+                )
+                appointment_service_result = await db.execute(appointment_service_query)
+                appointment_service = appointment_service_result.scalar_one_or_none()
+                if appointment_service:
+                    await db.delete(appointment_service)
+        
+        # Adicionar novos serviços
+        for service in services_to_use:
+            # Verificar se já existe
+            existing_query = select(AppointmentServiceModel).where(
+                and_(
+                    AppointmentServiceModel.appointment_id == appointment_id_str,
+                    AppointmentServiceModel.service_id == str(service.id)
+                )
+            )
+            existing_result = await db.execute(existing_query)
+            existing = existing_result.scalar_one_or_none()
+            
+            if not existing:
+                new_appointment_service = AppointmentServiceModel(
+                    appointment_id=appointment_id_str,
+                    service_id=str(service.id)
+                )
+                db.add(new_appointment_service)
+        
+        # Atualizar service_id para compatibilidade (primeiro serviço)
+        if services_to_use:
+            appointment.service_id = str(services_to_use[0].id)
     
     # Atualizar status se fornecido
     if update_data.status:

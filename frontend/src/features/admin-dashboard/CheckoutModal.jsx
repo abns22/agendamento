@@ -55,15 +55,51 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     }
   }, [isOpen, services, isPaid])
   
-  // Limpar valueDue quando pagamento for marcado como à vista
+  // Preencher dados do cliente automaticamente quando abrir modal ou quando isPaid mudar para false
   useEffect(() => {
-    if (isPaid) {
-      setValueDue('')
-      setClientName('')
-      setClientPhone('')
-      setDueDate(null)
+    if (isOpen && appointment) {
+      if (!isPaid) {
+        // Preencher com dados do agendamento se disponíveis
+        if (appointment.customer_name) {
+          setClientName(appointment.customer_name)
+        }
+        if (appointment.customer_phone) {
+          setClientPhone(appointment.customer_phone)
+        }
+        
+        // Se o agendamento tem client_id, buscar dados completos do cliente
+        if (appointment.client_id) {
+          fetchClientData(appointment.client_id)
+        }
+      } else {
+        // Limpar campos quando pagamento for marcado como à vista
+        setValueDue('')
+        setClientName('')
+        setClientPhone('')
+        setDueDate(null)
+      }
     }
-  }, [isPaid])
+  }, [isOpen, appointment, isPaid])
+  
+  // Função para buscar dados completos do cliente
+  const fetchClientData = async (clientId) => {
+    try {
+      const response = await api.get(`/api/v1/admin/clients/${clientId}`)
+      const client = response.data
+      
+      // Preencher nome e telefone com dados do cliente (sobrescrever se já estiverem preenchidos)
+      if (client.name) {
+        setClientName(client.name)
+      }
+      if (client.phone_number) {
+        setClientPhone(client.phone_number)
+      }
+    } catch (err) {
+      console.error('Erro ao buscar dados do cliente:', err)
+      // Não bloquear o fluxo se não conseguir buscar dados do cliente
+      // Os dados do appointment (customer_name, customer_phone) já foram preenchidos acima
+    }
+  }
   
   const fetchPaymentMethods = async () => {
     try {
@@ -200,24 +236,65 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     
     // Verificar se há valor a receber
     const hasValueDue = valueDue && parseFloat(valueDue) > 0
+    const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
     
-    // Validações para pagamento (à vista ou parcial)
-    // Sempre validar quando há pagamentos ou quando é pagamento à vista
-    if (paymentEntries.length > 0 || isPaid) {
-      const totalPaid = calculateTotalPaid()
-      const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
-      const totalCovered = totalPaid + valueDueNum
-      
-      // Validar contra o valor final após desconto (não o valor bruto)
+    // Calcular total pago (apenas entradas com forma de pagamento válida)
+    const validPaymentEntries = paymentEntries.filter(pe => pe.payment_method_id && parseFloat(pe.value_paid) > 0)
+    const totalPaid = validPaymentEntries.reduce((sum, entry) => {
+      return sum + parseFloat(entry.value_paid || 0)
+    }, 0)
+    
+    // Calcular total coberto (pagamentos + valor a receber)
+    const totalCovered = totalPaid + valueDueNum
+    
+    // Validações para pagamento
+    // Se há valor a receber igual ao total, não precisa de forma de pagamento
+    // Se há valor a receber parcial, precisa de forma de pagamento para o restante
+    // Se não há valor a receber, precisa de forma de pagamento para o total
+    
+    if (hasValueDue && Math.abs(valueDueNum - finalValueAfterDiscount) < 0.01) {
+      // Pagamento totalmente a prazo: não precisa de forma de pagamento
+      if (totalPaid > 0) {
+        setError('Quando o valor a receber é igual ao total, não é necessário selecionar forma de pagamento')
+        return
+      }
+    } else if (hasValueDue && valueDueNum < finalValueAfterDiscount) {
+      // Pagamento parcial a prazo: precisa de forma de pagamento para o restante
       if (Math.abs(totalCovered - finalValueAfterDiscount) > 0.01) {
-        setError(`A soma dos pagamentos (${formatCurrency(totalPaid)})${hasValueDue ? ` + valor a receber (${formatCurrency(valueDueNum)})` : ''} deve ser igual ao valor final após desconto (${formatCurrency(finalValueAfterDiscount)})`)
+        setError(`A soma dos pagamentos (${formatCurrency(totalPaid)}) + valor a receber (${formatCurrency(valueDueNum)}) deve ser igual ao valor final após desconto (${formatCurrency(finalValueAfterDiscount)})`)
         return
       }
-      
-      if (paymentEntries.length > 0 && paymentEntries.some(pe => !pe.payment_method_id || parseFloat(pe.value_paid) <= 0)) {
-        setError('Preencha todas as formas de pagamento corretamente')
+      if (validPaymentEntries.length === 0) {
+        setError('É necessário selecionar pelo menos uma forma de pagamento quando há valor a receber parcial')
         return
       }
+    } else if (!hasValueDue) {
+      // Pagamento à vista: precisa de forma de pagamento para o total
+      if (Math.abs(totalPaid - finalValueAfterDiscount) > 0.01) {
+        setError(`A soma dos pagamentos (${formatCurrency(totalPaid)}) deve ser igual ao valor final após desconto (${formatCurrency(finalValueAfterDiscount)})`)
+        return
+      }
+      if (validPaymentEntries.length === 0) {
+        setError('É necessário selecionar pelo menos uma forma de pagamento')
+        return
+      }
+    } else {
+      // Caso inválido: valor a receber maior que o total
+      if (valueDueNum > finalValueAfterDiscount) {
+        setError(`O valor a receber (${formatCurrency(valueDueNum)}) não pode ser maior que o valor final após desconto (${formatCurrency(finalValueAfterDiscount)})`)
+        return
+      }
+    }
+    
+    // Validar que todas as formas de pagamento preenchidas estão corretas
+    if (validPaymentEntries.length > 0 && paymentEntries.some(pe => {
+      const hasValue = parseFloat(pe.value_paid) > 0
+      const hasMethod = pe.payment_method_id
+      // Se tem valor mas não tem método, ou tem método mas não tem valor, é inválido
+      return (hasValue && !hasMethod) || (hasMethod && !hasValue)
+    })) {
+      setError('Preencha todas as formas de pagamento corretamente')
+      return
     }
     
     // Validar se há valor a receber (value_due)
@@ -235,19 +312,24 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     try {
       setIsSubmitting(true)
       
-      const payload = {
-        payment_entries: paymentEntries.map(pe => ({
+      // Filtrar apenas entradas de pagamento válidas (com método e valor > 0)
+      const validPaymentEntriesForPayload = paymentEntries
+        .filter(pe => pe.payment_method_id && parseFloat(pe.value_paid) > 0)
+        .map(pe => ({
           payment_method_id: pe.payment_method_id,
           value_paid: parseFloat(pe.value_paid),
           installments: isCreditCard(pe.payment_method_id) && pe.installments > 1 ? pe.installments : undefined
-        })),
+        }))
+      
+      const payload = {
+        payment_entries: validPaymentEntriesForPayload, // Enviar apenas entradas válidas
         additional_cost: additionalCost ? parseFloat(additionalCost) : null,
         discount: discountValue > 0 ? discountValue : 0, // Enviar desconto (0 se não houver)
-        is_paid: isPaid, // True se foi pago (total ou parcialmente)
+        is_paid: !hasValueDue || (hasValueDue && totalPaid > 0), // True se foi pago (total ou parcialmente), False se totalmente a prazo
         client_name: hasValueDue ? clientName.trim() : null,
         client_phone: hasValueDue ? (clientPhone.trim() || null) : null,
         due_date: hasValueDue ? dueDate.toISOString() : null,
-        value_due: hasValueDue ? parseFloat(valueDue) : null // Valor a receber (pode ser parcial)
+        value_due: hasValueDue ? parseFloat(valueDue) : null // Valor a receber (pode ser parcial ou total)
       }
       
       const response = await api.post(

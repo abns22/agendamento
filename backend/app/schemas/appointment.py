@@ -155,6 +155,38 @@ class AppointmentRescheduleRequest(BaseModel):
         }
 
 
+class AppointmentUpdate(BaseModel):
+    """Schema para atualização de um agendamento existente."""
+    status: Optional[str] = Field(None, description="Novo status do agendamento (PENDING, CONFIRMED, CANCELED, COMPLETED)")
+    start_datetime: Optional[datetime] = Field(None, description="Nova data e hora de início do agendamento (UTC)")
+    service_ids: Optional[List[UUID]] = Field(
+        None,
+        min_length=1,
+        description="Nova lista de UUIDs dos serviços (opcional, mantém os atuais se não for enviado)"
+    )
+    # Compatibilidade retroativa
+    service_id: Optional[UUID] = Field(
+        None,
+        description="DEPRECATED: Use service_ids. Novo UUID único do serviço (opcional, para compatibilidade)"
+    )
+    
+    @model_validator(mode='after')
+    def normalize_service_ids(self):
+        """Normaliza service_ids: se service_id único for fornecido, converte para lista."""
+        if not self.service_ids and self.service_id:
+            self.service_ids = [self.service_id]
+        return self
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "CONFIRMED",
+                "start_datetime": "2024-01-20T14:00:00Z",
+                "service_ids": ["123e4567-e89b-12d3-a456-426614174000"]
+            }
+        }
+
+
 class AppointmentResponse(BaseModel):
     """Schema de resposta para Appointment."""
     id: UUID
@@ -166,6 +198,7 @@ class AppointmentResponse(BaseModel):
     service_display_color_code: Optional[str] = None  # Cor do primeiro serviço (para compatibilidade)
     service_display_color_codes: Optional[List[str]] = None  # Lista de cores dos serviços
     total_value: Optional[Decimal] = None  # Valor total agendado (soma dos serviços com promoções)
+    client_id: Optional[UUID] = None  # ID do cliente (CRM) - opcional
     customer_name: Optional[str] = None  # Nullable para bloqueios
     customer_phone: Optional[str] = None  # Nullable para bloqueios
     start_datetime: datetime

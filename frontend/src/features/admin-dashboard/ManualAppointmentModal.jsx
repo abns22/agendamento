@@ -7,10 +7,17 @@ import { Modal, Button, Card } from '../../components/ui'
 /**
  * Modal de Agendamento Manual
  * 
- * Permite que o administrador crie agendamentos manualmente,
+ * Permite que o administrador crie ou edite agendamentos manualmente,
  * selecionando data e horário disponível.
+ * 
+ * Props:
+ * - isOpen: boolean - Controla se o modal está aberto
+ * - onClose: function - Callback ao fechar o modal
+ * - services: array - Lista de serviços disponíveis
+ * - onSuccess: function - Callback após sucesso (criar ou editar)
+ * - appointment: object (opcional) - Agendamento para edição (se fornecido, entra em modo edição)
  */
-const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
+const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointment = null }) => {
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [selectedTime, setSelectedTime] = useState(null)
   const [availableSlots, setAvailableSlots] = useState([])
@@ -27,23 +34,77 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState(null)
 
-  // Resetar estado ao abrir/fechar modal
+  // Determinar se está em modo edição
+  const isEditMode = !!appointment
+  
+  // Carregar dados do agendamento ao abrir em modo edição
   useEffect(() => {
     if (isOpen) {
-      setSelectedDate(new Date())
-      setSelectedTime(null)
-      setSelectedServices([])
-      setCustomerName('')
-      setCustomerContact('')
-      setCustomerBirthDate('')
-      setSelectedClientId(null)
-      setClientSearchQuery('')
-      setClientSearchResults([])
-      setShowClientSuggestions(false)
-      setError(null)
-      setAvailableSlots([])
+      if (isEditMode && appointment) {
+        // Modo edição: carregar dados do agendamento
+        // Carregar data e horário
+        const startDate = new Date(appointment.start_datetime)
+        setSelectedDate(startDate)
+        
+        // Formatar horário como HH:MM
+        const hours = String(startDate.getHours()).padStart(2, '0')
+        const minutes = String(startDate.getMinutes()).padStart(2, '0')
+        setSelectedTime(`${hours}:${minutes}`)
+        
+        // Carregar serviços selecionados
+        if (appointment.service_ids && appointment.service_ids.length > 0) {
+          const selectedServicesFromAppointment = services.filter(s => 
+            appointment.service_ids.includes(s.id)
+          )
+          setSelectedServices(selectedServicesFromAppointment)
+        } else if (appointment.service_id) {
+          // Fallback para service_id único (compatibilidade)
+          const service = services.find(s => s.id === appointment.service_id)
+          if (service) {
+            setSelectedServices([service])
+          }
+        }
+        
+        // Carregar dados do cliente
+        if (appointment.customer_name) {
+          setCustomerName(appointment.customer_name)
+        }
+        if (appointment.customer_phone) {
+          setCustomerContact(appointment.customer_phone)
+        }
+        
+        // Buscar slots disponíveis para a data (chamada assíncrona)
+        const fetchSlotsForEdit = async () => {
+          try {
+            const dateStr = format(startDate, 'yyyy-MM-dd')
+            setIsLoadingSlots(true)
+            const response = await api.get(`/api/v1/admin/appointments/availability?date=${dateStr}`)
+            setAvailableSlots(response.data?.available_slots || [])
+          } catch (err) {
+            console.error('Erro ao buscar disponibilidade:', err)
+            setAvailableSlots([])
+          } finally {
+            setIsLoadingSlots(false)
+          }
+        }
+        fetchSlotsForEdit()
+      } else {
+        // Modo criação: resetar estado
+        setSelectedDate(new Date())
+        setSelectedTime(null)
+        setSelectedServices([])
+        setCustomerName('')
+        setCustomerContact('')
+        setCustomerBirthDate('')
+        setSelectedClientId(null)
+        setClientSearchQuery('')
+        setClientSearchResults([])
+        setShowClientSuggestions(false)
+        setError(null)
+        setAvailableSlots([])
+      }
     }
-  }, [isOpen, services])
+  }, [isOpen, services, appointment, isEditMode])
 
   // Buscar clientes com debounce
   useEffect(() => {
@@ -131,12 +192,13 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
     }
   }, [showClientSuggestions])
 
-  // Buscar slots disponíveis quando data mudar
+  // Buscar slots disponíveis quando data mudar (apenas em modo criação)
   useEffect(() => {
-    if (isOpen && selectedDate) {
+    if (isOpen && selectedDate && !isEditMode) {
       fetchAvailableSlots()
     }
-  }, [isOpen, selectedDate])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, selectedDate, isEditMode])
 
   const fetchAvailableSlots = async () => {
     if (!selectedDate) return
@@ -183,7 +245,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
     return selectedServices.some(s => s.id === serviceId)
   }
   
-  // Calcular duração total e valor total
+  // Calcular duração total e valor total (atualização dinâmica)
   const totalDuration = selectedServices.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   const totalValue = selectedServices.reduce((sum, s) => {
     // Verificar se há promoção ativa (usar promotion_active se disponível, senão calcular)
@@ -201,6 +263,30 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
     }
     return sum + parseFloat(s.price)
   }, 0)
+  
+  // Calcular valores originais (para comparação em modo edição)
+  const originalDuration = appointment ? (appointment.service_ids?.length > 0 
+    ? services.filter(s => appointment.service_ids.includes(s.id))
+        .reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
+    : appointment.service_id 
+      ? services.find(s => s.id === appointment.service_id)?.duration_minutes || 0
+      : 0
+  ) : 0
+  
+  const originalValue = appointment ? (appointment.total_value ? parseFloat(appointment.total_value) : 0) : 0
+  
+  // Determinar se houve mudanças
+  const hasChanges = isEditMode && (
+    totalDuration !== originalDuration || 
+    totalValue !== originalValue ||
+    (appointment && selectedTime && (() => {
+      const [hours, minutes] = selectedTime.split(':')
+      const newDateTime = new Date(selectedDate)
+      newDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
+      const originalDateTime = new Date(appointment.start_datetime)
+      return newDateTime.getTime() !== originalDateTime.getTime()
+    })())
+  )
 
   const validateForm = () => {
     // Validar serviços
@@ -277,39 +363,79 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
       // Converter para UTC (o backend espera UTC e confia que já está em UTC)
       const utcDateTime = new Date(dateTime.getTime() - (dateTime.getTimezoneOffset() * 60000))
       
-      const payload = {
-        // tenant_id é inferido pelo backend a partir do token/header
-        service_ids: selectedServices.map(s => s.id), // Array de IDs de serviços
-        data_agendamento: utcDateTime.toISOString(),
-        cliente_nome: customerName.trim(),
-        cliente_contato: customerContact.trim(),
-        // Se cliente foi selecionado, enviar client_id, senão enviar apenas dados para criar/buscar
-        ...(selectedClientId ? { client_id: selectedClientId } : {}),
-        // Enviar aniversário se preenchido (formato YYYY-MM-DD)
-        ...(customerBirthDate ? { cliente_aniversario: customerBirthDate } : {})
-      }
-
-      await api.post('/api/v1/admin/appointments/manual', payload)
-
-      // Feedback visual de sucesso
-      try {
-        if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-          window.alert('Agendamento manual criado com sucesso!')
+      if (isEditMode && appointment) {
+        // Modo edição: PUT para atualizar agendamento
+        const payload = {
+          service_ids: selectedServices.map(s => s.id), // Array de IDs de serviços
+          start_datetime: utcDateTime.toISOString()
         }
-      } catch {
-        // Ignorar falhas em alert
+        
+        try {
+          await api.put(`/api/v1/admin/appointments/${appointment.id}`, payload)
+          
+          // Feedback visual de sucesso
+          try {
+            if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+              window.alert('Agendamento atualizado com sucesso!')
+            }
+          } catch {
+            // Ignorar falhas em alert
+          }
+          
+          if (onSuccess) {
+            onSuccess()
+          }
+          
+          onClose()
+        } catch (err) {
+          console.error('Erro ao atualizar agendamento:', err)
+          
+          // Tratar erro 409 (conflito de horário)
+          if (err.response?.status === 409) {
+            setError('Não há tempo suficiente para adicionar este serviço sem conflitar com o próximo cliente.')
+          } else {
+            setError(
+              err.response?.data?.detail || 
+              'Erro ao atualizar agendamento. Tente novamente.'
+            )
+          }
+        }
+      } else {
+        // Modo criação: POST para criar novo agendamento
+        const payload = {
+          // tenant_id é inferido pelo backend a partir do token/header
+          service_ids: selectedServices.map(s => s.id), // Array de IDs de serviços
+          data_agendamento: utcDateTime.toISOString(),
+          cliente_nome: customerName.trim(),
+          cliente_contato: customerContact.trim(),
+          // Se cliente foi selecionado, enviar client_id, senão enviar apenas dados para criar/buscar
+          ...(selectedClientId ? { client_id: selectedClientId } : {}),
+          // Enviar aniversário se preenchido (formato YYYY-MM-DD)
+          ...(customerBirthDate ? { cliente_aniversario: customerBirthDate } : {})
+        }
+
+        await api.post('/api/v1/admin/appointments/manual', payload)
+
+        // Feedback visual de sucesso
+        try {
+          if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+            window.alert('Agendamento manual criado com sucesso!')
+          }
+        } catch {
+          // Ignorar falhas em alert
+        }
+        
+        if (onSuccess) {
+          onSuccess()
+        }
+        
+        onClose()
       }
-      
-      if (onSuccess) {
-        onSuccess()
-      }
-      
-      onClose()
     } catch (err) {
-      console.error('Erro ao criar agendamento:', err)
+      console.error('Erro ao processar agendamento:', err)
       setError(
         err.response?.data?.detail || 
-        'Erro ao criar agendamento. Tente novamente.'
+        `Erro ao ${isEditMode ? 'atualizar' : 'criar'} agendamento. Tente novamente.`
       )
     } finally {
       setIsSubmitting(false)
@@ -403,7 +529,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
   const weekDays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Agendamento Manual" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEditMode ? "Editar Agendamento" : "Agendamento Manual"} size="lg">
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Seleção de Serviços (Múltipla) */}
         <div>
@@ -522,18 +648,35 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
           {/* Resumo em tempo real */}
           {selectedServices.length > 0 && (
             <div className="mt-3 bg-primary/5 border-2 border-primary/20 rounded-lg p-3">
-              <div className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-4">
-                  <span className="font-semibold text-text">
-                    Total: <span className="text-primary">{selectedServices.length}</span> serviço{selectedServices.length > 1 ? 's' : ''}
-                  </span>
-                  <span className="font-semibold text-text">
-                    Tempo: <span className="text-primary">{formatDuration(totalDuration)}</span>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-4">
+                    <span className="font-semibold text-text">
+                      Total: <span className="text-primary">{selectedServices.length}</span> serviço{selectedServices.length > 1 ? 's' : ''}
+                    </span>
+                    <span className="font-semibold text-text">
+                      {isEditMode ? 'Nova ' : ''}Duração: <span className="text-primary">{formatDuration(totalDuration)}</span>
+                      {isEditMode && originalDuration !== totalDuration && (
+                        <span className="text-gray-500 ml-1">
+                          (anterior: {formatDuration(originalDuration)})
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <span className="text-lg font-bold text-primary">
+                    {isEditMode ? 'Novo ' : ''}Valor: {formatCurrency(totalValue)}
+                    {isEditMode && originalValue !== totalValue && (
+                      <span className="text-gray-500 text-sm font-normal ml-1">
+                        (anterior: {formatCurrency(originalValue)})
+                      </span>
+                    )}
                   </span>
                 </div>
-                <span className="text-lg font-bold text-primary">
-                  {formatCurrency(totalValue)}
-                </span>
+                {isEditMode && hasChanges && (
+                  <div className="text-xs text-blue-600 font-semibold pt-1 border-t border-primary/20">
+                    ⚠️ Alterações detectadas - O horário será recalculado automaticamente
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -630,7 +773,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
         {selectedDate && (
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Horário Disponível *
+              {isEditMode ? 'Horário' : 'Horário Disponível'} *
             </label>
             
             {isLoadingSlots ? (
@@ -640,7 +783,10 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
             ) : availableSlots.length === 0 ? (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                 <p className="text-yellow-800 text-sm">
-                  Não há horários disponíveis para esta data.
+                  {isEditMode 
+                    ? 'Não há horários disponíveis para esta data. Você pode manter o horário atual ou selecionar outro horário disponível.'
+                    : 'Não há horários disponíveis para esta data.'
+                  }
                 </p>
               </div>
             ) : (
@@ -823,6 +969,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
             </p>
           </div>
         </div>
+        )}
 
         {/* Erro */}
         {error && (
@@ -859,13 +1006,16 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess }) => {
               isSubmitting || 
               !selectedTime || 
               selectedServices.length === 0 || 
-              !customerName.trim() || 
-              !customerContact.trim() ||
-              services.length === 0
+              (!isEditMode && (!customerName.trim() || !customerContact.trim())) ||
+              services.length === 0 ||
+              (isEditMode && !hasChanges) // Em modo edição, só permitir salvar se houver mudanças
             }
             className="w-full sm:w-auto"
           >
-            {isSubmitting ? 'Agendando...' : 'Agendar Manualmente'}
+            {isSubmitting 
+              ? (isEditMode ? 'Salvando...' : 'Agendando...') 
+              : (isEditMode ? 'Salvar Alterações' : 'Agendar Manualmente')
+            }
           </Button>
         </div>
       </form>

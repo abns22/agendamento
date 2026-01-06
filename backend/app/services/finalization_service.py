@@ -156,7 +156,13 @@ class FinalizationService:
         net_value = Decimal('0.00')
         payment_entries_to_create = []
         
-        for payment_entry_data in payment_entries:
+        # Processar apenas entradas de pagamento válidas (com método e valor > 0)
+        valid_payment_entries = [
+            pe for pe in payment_entries 
+            if pe.get('payment_method_id') and Decimal(str(pe.get('value_paid', 0))) > 0
+        ]
+        
+        for payment_entry_data in valid_payment_entries:
             payment_method_id = payment_entry_data.get('payment_method_id')
             value_paid = Decimal(str(payment_entry_data.get('value_paid', 0)))
             # Garantir que installments seja um int, não None
@@ -164,7 +170,7 @@ class FinalizationService:
             installments = int(installments_raw) if installments_raw is not None else 1
             
             if not payment_method_id or value_paid <= 0:
-                raise ValueError("payment_method_id e value_paid são obrigatórios e value_paid deve ser > 0")
+                continue  # Pular entradas inválidas (já filtradas, mas garantir)
             
             # Buscar forma de pagamento
             payment_method_id_str = str(payment_method_id)
@@ -222,18 +228,47 @@ class FinalizationService:
         value_due_decimal = Decimal('0.00')
         if value_due is not None:
             value_due_decimal = Decimal(str(value_due))
+            if value_due_decimal < 0:
+                raise ValueError("Valor a receber não pode ser negativo")
+            if value_due_decimal > final_value_after_discount:
+                raise ValueError(
+                    f"Valor a receber ({value_due_decimal}) não pode ser maior que o valor final após desconto ({final_value_after_discount})"
+                )
         
         total_covered = total_paid + value_due_decimal
+        
+        # Permitir pagamento totalmente a prazo (sem payment_entries) se value_due = total
+        # Permitir pagamento parcial (com payment_entries + value_due) se soma = total
+        # Permitir pagamento à vista (apenas payment_entries) se total_paid = total
+        
         # Validar contra o valor final após desconto (não o valor bruto)
         if abs(total_covered - final_value_after_discount) > Decimal('0.01'):  # Tolerância de 1 centavo
-            raise ValueError(
-                f"A soma dos pagamentos ({total_paid}) + valor a receber ({value_due_decimal}) deve ser igual ao valor final após desconto ({final_value_after_discount})"
-            )
+            if value_due_decimal > 0 and total_paid == 0:
+                # Pagamento totalmente a prazo
+                raise ValueError(
+                    f"O valor a receber ({value_due_decimal}) deve ser igual ao valor final após desconto ({final_value_after_discount})"
+                )
+            elif value_due_decimal > 0 and total_paid > 0:
+                # Pagamento parcial
+                raise ValueError(
+                    f"A soma dos pagamentos ({total_paid}) + valor a receber ({value_due_decimal}) deve ser igual ao valor final após desconto ({final_value_after_discount})"
+                )
+            else:
+                # Pagamento à vista
+                raise ValueError(
+                    f"A soma dos pagamentos ({total_paid}) deve ser igual ao valor final após desconto ({final_value_after_discount})"
+                )
         
-        # 7. Calcular lucro
+        # 7. Ajustar net_value se não há pagamentos agora mas há valor a receber
+        # Quando o pagamento é totalmente a prazo, o net_value será o valor a receber
+        # (sem taxas, pois será pago depois)
+        if not payment_entries_to_create and value_due is not None and value_due > Decimal('0.00'):
+            net_value = value_due
+        
+        # 8. Calcular lucro
         total_profit = net_value - total_cost
         
-        # 8. Criar Transaction
+        # 9. Criar Transaction
         # Usar datetime.now() (timezone-naive, horário local) para que a data do pagamento
         # seja registrada no dia correto conforme o timezone local do servidor
         # Isso garante que pagamentos feitos no dia 25 apareçam no caixa do dia 25
@@ -253,7 +288,7 @@ class FinalizationService:
         db_session.add(new_transaction)
         await db_session.flush()  # Para obter o ID da transação
         
-        # 8. Criar PaymentEntry para cada forma de pagamento (se houver pagamentos agora)
+        # 10. Criar PaymentEntry para cada forma de pagamento (se houver pagamentos agora)
         # E criar Debtor se houver valor a receber (pagamento parcial ou total a prazo)
         new_debtor = None
         
@@ -334,7 +369,7 @@ class FinalizationService:
             
             db_session.add(new_debtor)
         
-        # 9. Atualizar Appointment
+        # 11. Atualizar Appointment
         appointment.status = AppointmentStatus.COMPLETED
         appointment.final_sale_value = net_value  # Valor líquido que entrou no caixa (ou que será recebido)
         appointment.service_cost = total_cost

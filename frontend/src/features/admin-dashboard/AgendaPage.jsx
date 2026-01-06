@@ -33,6 +33,7 @@ const AgendaPage = () => {
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false)
   const [isManualAppointmentModalOpen, setIsManualAppointmentModalOpen] = useState(false)
   const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false)
+  const [editingAppointment, setEditingAppointment] = useState(null) // Agendamento sendo editado
   const [showActionMenu, setShowActionMenu] = useState(false)
   const [selectedService, setSelectedService] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -766,6 +767,22 @@ const AgendaPage = () => {
                   </Button>
                 )}
 
+                {/* Editar - disponível para agendamentos não cancelados nem concluídos */}
+                {selectedAppointment.status !== 'CANCELED' && selectedAppointment.status !== 'COMPLETED' && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setEditingAppointment(selectedAppointment)
+                      setIsManualAppointmentModalOpen(true)
+                      handleCloseModal()
+                    }}
+                    disabled={isSubmitting}
+                    className="w-full"
+                  >
+                    ✏️ Editar Agendamento
+                  </Button>
+                )}
+                
                 {/* Reagendar - disponível para agendamentos não cancelados nem concluídos */}
                 {selectedAppointment.status !== 'CANCELED' && selectedAppointment.status !== 'COMPLETED' && (
                   <Button
@@ -989,9 +1006,13 @@ const AgendaPage = () => {
       {/* Modal de Agendamento Manual */}
       <ManualAppointmentModal
         isOpen={isManualAppointmentModalOpen}
-        onClose={() => setIsManualAppointmentModalOpen(false)}
+        onClose={() => {
+          setIsManualAppointmentModalOpen(false)
+          setEditingAppointment(null) // Limpar agendamento em edição ao fechar
+        }}
         services={services}
         onSuccess={fetchAppointments}
+        appointment={editingAppointment} // Passar agendamento para edição
       />
 
       {/* Modal de Reagendamento */}
