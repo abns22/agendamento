@@ -105,16 +105,26 @@ const AgendaPage = () => {
     description: ''
   })
 
+  // Função helper para formatar data sem problemas de timezone
+  const formatDateForAPI = useCallback((date) => {
+    if (!date) return null
+    // Usar getFullYear, getMonth, getDate para evitar problemas de timezone
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }, [])
+
   // Função para atualizar URL com os filtros
   const updateURLParams = useCallback((updates) => {
     const newParams = new URLSearchParams(searchParams)
-    
+
     Object.entries(updates).forEach(([key, value]) => {
       if (value === null || value === '' || value === undefined) {
         newParams.delete(key)
       } else {
         if (value instanceof Date) {
-          newParams.set(key, format(value, 'yyyy-MM-dd'))
+          newParams.set(key, formatDateForAPI(value))
         } else {
           newParams.set(key, value.toString())
         }
@@ -122,7 +132,7 @@ const AgendaPage = () => {
     })
     
     setSearchParams(newParams, { replace: true })
-  }, [searchParams, setSearchParams])
+  }, [searchParams, setSearchParams, formatDateForAPI])
 
   // Função para obter data atual no timezone do Brasil (America/Sao_Paulo)
   const getBrazilianDate = useCallback(() => {
@@ -278,8 +288,8 @@ const AgendaPage = () => {
     setEndDate(monthEnd)
     updateURLParams({
       days_ahead: null,
-      start_date: format(monthStart, 'yyyy-MM-dd'),
-      end_date: format(monthEnd, 'yyyy-MM-dd')
+      start_date: formatDateForAPI(monthStart),
+      end_date: formatDateForAPI(monthEnd)
     })
   }
 
@@ -288,11 +298,21 @@ const AgendaPage = () => {
     setSearchQuery(value)
   }
 
+  // Função helper para formatar data sem problemas de timezone
+  const formatDateForAPI = (date) => {
+    if (!date) return null
+    // Usar getFullYear, getMonth, getDate para evitar problemas de timezone
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
   const handleStartDateChange = (date) => {
     setStartDate(date)
     setDaysAhead(null) // Limpar days_ahead quando usar data customizada
     updateURLParams({ 
-      start_date: date ? format(date, 'yyyy-MM-dd') : null,
+      start_date: date ? formatDateForAPI(date) : null,
       days_ahead: null
     })
   }
@@ -301,7 +321,7 @@ const AgendaPage = () => {
     setEndDate(date)
     setDaysAhead(null) // Limpar days_ahead quando usar data customizada
     updateURLParams({ 
-      end_date: date ? format(date, 'yyyy-MM-dd') : null,
+      end_date: date ? formatDateForAPI(date) : null,
       days_ahead: null
     })
   }

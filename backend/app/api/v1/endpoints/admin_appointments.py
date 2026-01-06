@@ -362,26 +362,29 @@ async def list_appointments(
             
             if start_date:
                 try:
-                    # Parse da data como timezone-naive (sem timezone)
-                    # Considerar que a data vem do timezone do Brasil (America/Sao_Paulo, UTC-3)
-                    # Converter para UTC para comparação com start_datetime (que está em UTC no banco)
+                    # Parse da data (YYYY-MM-DD)
+                    parsed_date = datetime.strptime(start_date, '%Y-%m-%d')
+                    
+                    # Criar datetime no timezone do Brasil às 00:00:00
                     try:
                         from zoneinfo import ZoneInfo
                         brazil_tz = ZoneInfo('America/Sao_Paulo')
-                        utc_tz = ZoneInfo('UTC')
                     except ImportError:
-                        # Fallback para Python < 3.9 ou sistemas sem zoneinfo
                         from datetime import timezone as dt_timezone
-                        brazil_tz = dt_timezone(timedelta(hours=-3))  # UTC-3 para São Paulo
-                        utc_tz = dt_timezone.utc
+                        brazil_tz = dt_timezone(timedelta(hours=-3))
                     
-                    # Criar datetime no timezone do Brasil às 00:00:00
-                    start_dt_brazil = datetime.strptime(start_date, '%Y-%m-%d').replace(
-                        hour=0, minute=0, second=0, microsecond=0, tzinfo=brazil_tz
+                    # Criar datetime local no Brasil (00:00:00 do dia selecionado)
+                    start_dt_brazil = datetime(
+                        parsed_date.year, parsed_date.month, parsed_date.day,
+                        hour=0, minute=0, second=0, microsecond=0,
+                        tzinfo=brazil_tz
                     )
+                    
                     # Converter para UTC (mantendo o mesmo momento no tempo)
-                    start_dt = start_dt_brazil.astimezone(utc_tz).replace(tzinfo=None)
-                    conditions.append(Appointment.start_datetime >= start_dt)
+                    # Exemplo: 07/01 00:00:00 BRT (UTC-3) = 07/01 03:00:00 UTC
+                    start_dt_utc = start_dt_brazil.astimezone(timezone.utc).replace(tzinfo=None)
+                    
+                    conditions.append(Appointment.start_datetime >= start_dt_utc)
                 except ValueError:
                     raise HTTPException(
                         status_code=400,
@@ -390,26 +393,29 @@ async def list_appointments(
             
             if end_date:
                 try:
-                    # Parse da data como timezone-naive (sem timezone)
-                    # Considerar que a data vem do timezone do Brasil (America/Sao_Paulo, UTC-3)
-                    # Converter para UTC para comparação com start_datetime (que está em UTC no banco)
+                    # Parse da data (YYYY-MM-DD)
+                    parsed_date = datetime.strptime(end_date, '%Y-%m-%d')
+                    
+                    # Criar datetime no timezone do Brasil às 23:59:59.999999
                     try:
                         from zoneinfo import ZoneInfo
                         brazil_tz = ZoneInfo('America/Sao_Paulo')
-                        utc_tz = ZoneInfo('UTC')
                     except ImportError:
-                        # Fallback para Python < 3.9 ou sistemas sem zoneinfo
                         from datetime import timezone as dt_timezone
-                        brazil_tz = dt_timezone(timedelta(hours=-3))  # UTC-3 para São Paulo
-                        utc_tz = dt_timezone.utc
+                        brazil_tz = dt_timezone(timedelta(hours=-3))
                     
-                    # Criar datetime no timezone do Brasil às 23:59:59.999999
-                    end_dt_brazil = datetime.strptime(end_date, '%Y-%m-%d').replace(
-                        hour=23, minute=59, second=59, microsecond=999999, tzinfo=brazil_tz
+                    # Criar datetime local no Brasil (23:59:59.999999 do dia selecionado)
+                    # Exemplo: 07/01 23:59:59 BRT (UTC-3) = 08/01 02:59:59 UTC
+                    end_dt_brazil = datetime(
+                        parsed_date.year, parsed_date.month, parsed_date.day,
+                        hour=23, minute=59, second=59, microsecond=999999,
+                        tzinfo=brazil_tz
                     )
+                    
                     # Converter para UTC (mantendo o mesmo momento no tempo)
-                    end_dt = end_dt_brazil.astimezone(utc_tz).replace(tzinfo=None)
-                    conditions.append(Appointment.start_datetime <= end_dt)
+                    end_dt_utc = end_dt_brazil.astimezone(timezone.utc).replace(tzinfo=None)
+                    
+                    conditions.append(Appointment.start_datetime <= end_dt_utc)
                 except ValueError:
                     raise HTTPException(
                         status_code=400,
@@ -747,8 +753,27 @@ async def update_appointment(
     await db.flush()
     await db.commit()
     
-    # Recarregar appointment com todos os relacionamentos após commit
+    # IMPORTANTE: Fazer refresh explícito do appointment para garantir que os dados atualizados sejam carregados
+    # Primeiro, fazer refresh sem relacionamentos
+    await db.refresh(appointment)
+    
+    # Depois, recarregar relacionamentos explicitamente
     await db.refresh(appointment, ['services', 'client'])
+    
+    # Se os serviços foram atualizados, garantir que estão carregados
+    if has_service_ids:
+        # Forçar recarregamento dos serviços
+        from sqlalchemy.orm import selectinload
+        appointment_query = select(Appointment).options(
+            selectinload(Appointment.services),
+            selectinload(Appointment.client)
+        ).where(
+            Appointment.id == appointment_id_str
+        )
+        refreshed_result = await db.execute(appointment_query)
+        refreshed_appointment = refreshed_result.scalar_one_or_none()
+        if refreshed_appointment:
+            appointment = refreshed_appointment
     
     return await build_appointment_response(appointment, db)
 
