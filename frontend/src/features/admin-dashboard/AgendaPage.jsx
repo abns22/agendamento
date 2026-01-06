@@ -21,6 +21,7 @@ import RescheduleAppointmentModal from './RescheduleAppointmentModal'
  * - Criar bloqueio manual
  */
 const AgendaPage = () => {
+  // Inicializar useSearchParams primeiro
   const [searchParams, setSearchParams] = useSearchParams()
   
   // Estados principais
@@ -44,25 +45,57 @@ const AgendaPage = () => {
   const [appointmentsSummary, setAppointmentsSummary] = useState(null)
   const [showAppointmentsSummary, setShowAppointmentsSummary] = useState(true)
   
-  // Filtros - inicializar a partir da URL
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '')
-  const [startDate, setStartDate] = useState(searchParams.get('start_date') ? new Date(searchParams.get('start_date')) : null)
-  const [endDate, setEndDate] = useState(searchParams.get('end_date') ? new Date(searchParams.get('end_date')) : null)
-  const [daysAhead, setDaysAhead] = useState(searchParams.get('days_ahead') ? parseInt(searchParams.get('days_ahead')) : null)
-  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '')
-  const [serviceFilter, setServiceFilter] = useState(searchParams.get('service_id') || '')
+  // Filtros - inicializar com valores padrão (serão sincronizados com URL via useEffect)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [startDate, setStartDate] = useState(null)
+  const [endDate, setEndDate] = useState(null)
+  const [daysAhead, setDaysAhead] = useState(null)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [serviceFilter, setServiceFilter] = useState('')
   
   // Ref para debounce
   const searchDebounceRef = useRef(null)
 
   // Sincronizar estados locais com URL quando ela mudar (ex: botão voltar/avançar)
   useEffect(() => {
-    setSearchQuery(searchParams.get('search') || '')
-    setStartDate(searchParams.get('start_date') ? new Date(searchParams.get('start_date')) : null)
-    setEndDate(searchParams.get('end_date') ? new Date(searchParams.get('end_date')) : null)
-    setDaysAhead(searchParams.get('days_ahead') ? parseInt(searchParams.get('days_ahead')) : null)
-    setStatusFilter(searchParams.get('status') || '')
-    setServiceFilter(searchParams.get('service_id') || '')
+    const search = searchParams.get('search') || ''
+    const startDateParam = searchParams.get('start_date')
+    const endDateParam = searchParams.get('end_date')
+    const daysAheadParam = searchParams.get('days_ahead')
+    const status = searchParams.get('status') || ''
+    const serviceId = searchParams.get('service_id') || ''
+    
+    setSearchQuery(search)
+    
+    if (startDateParam) {
+      try {
+        setStartDate(new Date(startDateParam))
+      } catch (e) {
+        setStartDate(null)
+      }
+    } else {
+      setStartDate(null)
+    }
+    
+    if (endDateParam) {
+      try {
+        setEndDate(new Date(endDateParam))
+      } catch (e) {
+        setEndDate(null)
+      }
+    } else {
+      setEndDate(null)
+    }
+    
+    if (daysAheadParam) {
+      const daysAheadNum = parseInt(daysAheadParam)
+      setDaysAhead(isNaN(daysAheadNum) ? null : daysAheadNum)
+    } else {
+      setDaysAhead(null)
+    }
+    
+    setStatusFilter(status)
+    setServiceFilter(serviceId)
   }, [searchParams])
 
   // Formulário de bloqueio
@@ -71,11 +104,6 @@ const AgendaPage = () => {
     end_datetime: '',
     description: ''
   })
-
-  // Carregar serviços ao montar componente
-  useEffect(() => {
-    fetchServices()
-  }, [])
 
   // Função para atualizar URL com os filtros
   const updateURLParams = useCallback((updates) => {
@@ -96,27 +124,20 @@ const AgendaPage = () => {
     setSearchParams(newParams, { replace: true })
   }, [searchParams, setSearchParams])
 
-  // Debounce para busca
-  useEffect(() => {
-    if (searchDebounceRef.current) {
-      clearTimeout(searchDebounceRef.current)
-    }
-    
-    searchDebounceRef.current = setTimeout(() => {
-      updateURLParams({ search: searchQuery })
-    }, 300)
-    
-    return () => {
-      if (searchDebounceRef.current) {
-        clearTimeout(searchDebounceRef.current)
-      }
-    }
-  }, [searchQuery, updateURLParams])
-
-  // Carregar agendamentos quando filtros mudarem
-  useEffect(() => {
-    fetchAppointments()
-  }, [fetchAppointments])
+  // Função para obter data atual no timezone do Brasil (America/Sao_Paulo)
+  const getBrazilianDate = useCallback(() => {
+    const now = new Date()
+    // Obter a data atual no timezone do Brasil
+    const brazilDateStr = now.toLocaleString('pt-BR', { 
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    })
+    // Criar uma nova data a partir da string formatada (sem timezone)
+    const [day, month, year] = brazilDateStr.split('/')
+    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
+  }, [])
 
   const fetchServices = async () => {
     try {
@@ -129,23 +150,6 @@ const AgendaPage = () => {
       setIsLoadingServices(false)
     }
   }
-
-  // Função para obter data atual no timezone do Brasil (America/Sao_Paulo)
-  // O backend usa UTC, mas para calcular "hoje" no Brasil, precisamos considerar o timezone
-  const getBrazilianDate = useCallback(() => {
-    const now = new Date()
-    // Obter a data atual no timezone do Brasil
-    // Usar toLocaleString para obter a data no timezone do Brasil
-    const brazilDateStr = now.toLocaleString('pt-BR', { 
-      timeZone: 'America/Sao_Paulo',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    })
-    // Criar uma nova data a partir da string formatada (sem timezone)
-    const [day, month, year] = brazilDateStr.split('/')
-    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
-  }, [])
 
   const fetchAppointments = useCallback(async () => {
     try {
@@ -196,6 +200,33 @@ const AgendaPage = () => {
       setIsLoading(false)
     }
   }, [searchParams])
+
+  // Carregar serviços ao montar componente
+  useEffect(() => {
+    fetchServices()
+  }, [])
+
+  // Debounce para busca
+  useEffect(() => {
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current)
+    }
+    
+    searchDebounceRef.current = setTimeout(() => {
+      updateURLParams({ search: searchQuery })
+    }, 300)
+    
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current)
+      }
+    }
+  }, [searchQuery, updateURLParams])
+
+  // Carregar agendamentos quando filtros mudarem
+  useEffect(() => {
+    fetchAppointments()
+  }, [fetchAppointments])
 
   // Handlers para botões de atalho
   const handleQuickFilter = (days) => {
