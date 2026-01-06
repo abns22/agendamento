@@ -287,31 +287,46 @@ class AppointmentUpdate(BaseModel):
     "",
     response_model=List[AppointmentResponse],
     summary="Listar agendamentos",
-    description="Retorna todos os agendamentos do tenant autenticado, opcionalmente filtrados por data, status e serviço. Sempre ordenado por start_datetime ASC."
+    description="Retorna todos os agendamentos do tenant autenticado com filtros avançados. Sempre ordenado por start_datetime ASC."
 )
 async def list_appointments(
-    date: Optional[str] = Query(None, description="Data para filtrar (YYYY-MM-DD). Se não fornecido, retorna todos os agendamentos."),
+    search: Optional[str] = Query(None, description="Busca por texto (nome do cliente ou e-mail). Busca parcial e insensível a maiúsculas."),
+    service_id: Optional[UUID] = Query(None, description="Filtrar agendamentos que contenham um serviço específico."),
+    start_date: Optional[str] = Query(None, description="Data inicial do período (YYYY-MM-DD). Ignorado se days_ahead for fornecido."),
+    end_date: Optional[str] = Query(None, description="Data final do período (YYYY-MM-DD). Ignorado se days_ahead for fornecido."),
+    days_ahead: Optional[int] = Query(None, ge=1, description="Número de dias a partir de hoje (1, 2, 7, 30). Sobrescreve start_date/end_date."),
     status: Optional[str] = Query(None, description="Status para filtrar (SCHEDULED, CONFIRMED, COMPLETED, CANCELED)."),
-    service_id: Optional[UUID] = Query(None, description="ID do serviço para filtrar."),
     tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Lista todos os agendamentos do tenant autenticado.
+    Lista todos os agendamentos do tenant autenticado com filtros avançados.
     
-    Permite filtrar por data específica. Retorna tanto agendamentos de clientes
-    quanto bloqueios manuais (is_manual_block=True).
+    Filtros disponíveis:
+    - search: Busca por nome do cliente ou e-mail (busca parcial, case-insensitive)
+    - service_id: Filtra agendamentos que contenham um serviço específico
+    - start_date/end_date: Filtra por período (YYYY-MM-DD)
+    - days_ahead: Calcula período automaticamente (hoje até hoje + X dias). Sobrescreve start_date/end_date
+    - status: Filtra por status do agendamento
+    
+    Ordenação: Sempre ordenado por start_datetime ASC (mais próximos primeiro).
+    
+    Performance: Usa JOIN eficiente para evitar N+1 queries.
     
     Args:
-        date: Data para filtrar (opcional, formato YYYY-MM-DD)
+        search: Termo de busca por nome do cliente ou e-mail
+        service_id: ID do serviço para filtrar
+        start_date: Data inicial do período (YYYY-MM-DD)
+        end_date: Data final do período (YYYY-MM-DD)
+        days_ahead: Número de dias a partir de hoje (sobrescreve start_date/end_date)
+        status: Status do agendamento para filtrar
         tenant: Tenant autenticado
         db: Sessão do banco de dados
         
     Returns:
         List[AppointmentResponse]: Lista de agendamentos ordenados por horário
     """
-    # Construir query base
-    # IMPORTANTE: Converter tenant_id para string (MySQL armazena UUIDs como String(36))
+    # Construir query base com JOIN otimizado para evitar N+1
     tenant_id_str = str(tenant.id) if tenant.id else None
     if not tenant_id_str:
         raise HTTPException(
@@ -319,38 +334,99 @@ async def list_appointments(
             detail="tenant_id inválido"
         )
     
-    query = select(Appointment).where(
+    # Query base com selectinload para carregar serviços de forma eficiente
+    query = select(Appointment).options(
+        selectinload(Appointment.services)
+    ).where(
         Appointment.tenant_id == tenant_id_str
     )
     
-    # Aplicar filtro de data se fornecido
-    if date:
-        try:
-            # Converter data para datetime (início e fim do dia) - timezone-naive para compatibilidade com PostgreSQL
-            start_dt = datetime.strptime(date, '%Y-%m-%d').replace(
-                hour=0, minute=0, second=0, microsecond=0
+    # LÓGICA DE PRIORIDADE: days_ahead sobrescreve start_date/end_date
+    if days_ahead:
+        # Calcular período automaticamente: hoje até hoje + X dias
+        now = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        start_dt = now
+        end_dt = now + timedelta(days=days_ahead)
+        end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        query = query.where(
+            and_(
+                Appointment.start_datetime >= start_dt,
+                Appointment.start_datetime <= end_dt
             )
-            end_dt = datetime.strptime(date, '%Y-%m-%d').replace(
-                hour=23, minute=59, second=59, microsecond=999999
-            )
+        )
+    else:
+        # Usar start_date/end_date se days_ahead não foi fornecido
+        if start_date or end_date:
+            conditions = []
             
-            # Filtrar agendamentos que começam no dia especificado
-            query = query.where(
-                and_(
-                    Appointment.start_datetime >= start_dt,
-                    Appointment.start_datetime <= end_dt
-                )
+            if start_date:
+                try:
+                    start_dt = datetime.strptime(start_date, '%Y-%m-%d').replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    )
+                    conditions.append(Appointment.start_datetime >= start_dt)
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="start_date deve estar no formato YYYY-MM-DD"
+                    )
+            
+            if end_date:
+                try:
+                    end_dt = datetime.strptime(end_date, '%Y-%m-%d').replace(
+                        hour=23, minute=59, second=59, microsecond=999999
+                    )
+                    conditions.append(Appointment.start_datetime <= end_dt)
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="end_date deve estar no formato YYYY-MM-DD"
+                    )
+            
+            if conditions:
+                query = query.where(and_(*conditions))
+    
+    # Aplicar filtro de busca por texto (nome do cliente ou e-mail)
+    if search:
+        search_term = f"%{search.lower()}%"
+        # Buscar em customer_name (campo do appointment) ou no nome do cliente relacionado
+        # Usar LEFT JOIN com Client para buscar também no nome do cliente
+        from sqlalchemy.orm import aliased
+        client_alias = aliased(Client)
+        
+        # Adicionar JOIN com Client (LEFT JOIN para não excluir agendamentos sem client_id)
+        query = query.outerjoin(
+            client_alias,
+            and_(
+                Appointment.client_id == client_alias.id,
+                client_alias.tenant_id == tenant_id_str
             )
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail="date deve estar no formato YYYY-MM-DD"
-            )
+        )
+        
+        # Buscar em customer_name (campo do appointment) OU no nome/email do cliente relacionado
+        search_conditions = [
+            func.lower(Appointment.customer_name).like(search_term),
+            func.lower(client_alias.name).like(search_term),
+            func.lower(client_alias.email).like(search_term)
+        ]
+        
+        query = query.where(or_(*search_conditions))
+    
+    # Aplicar filtro de service_id usando JOIN com AppointmentService
+    if service_id:
+        service_id_str = str(service_id)
+        # JOIN com AppointmentService para buscar agendamentos que contenham o serviço
+        query = query.join(
+            AppointmentServiceModel,
+            AppointmentServiceModel.appointment_id == Appointment.id
+        ).where(
+            AppointmentServiceModel.service_id == service_id_str
+        )
     
     # Aplicar filtro de status se fornecido
     if status:
         try:
-            # Validar status
             status_enum = AppointmentStatus(status.upper())
             query = query.where(Appointment.status == status_enum)
         except ValueError:
@@ -359,18 +435,19 @@ async def list_appointments(
                 detail=f"Status inválido. Use: SCHEDULED, CONFIRMED, COMPLETED, CANCELED"
             )
     
-    # Aplicar filtro de service_id se fornecido
-    if service_id:
-        service_id_str = str(service_id)
-        query = query.where(Appointment.service_id == service_id_str)
-    
     # Ordenar por horário de início (ORDENAÇÃO OBRIGATÓRIA - ASC)
     query = query.order_by(Appointment.start_datetime.asc())
+    
+    # Executar query
+    # Se houver JOINs (search ou service_id), usar distinct() para evitar duplicatas
+    if search or service_id:
+        query = query.distinct()
     
     result = await db.execute(query)
     appointments = result.scalars().all()
     
     # Construir responses com informações dos serviços
+    # Como já carregamos os serviços com selectinload, não precisamos fazer queries adicionais
     appointment_responses = []
     for apt in appointments:
         response = await build_appointment_response(apt, db)

@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
-import { format } from 'date-fns'
+import { format, startOfMonth, endOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { api, formatCurrency, formatDuration } from '../../utils/api'
-import { Card, Button, Modal } from '../../components/ui'
+import { Card, Button, Modal, Input } from '../../components/ui'
 import CheckoutModal from './CheckoutModal'
 import ManualAppointmentModal from './ManualAppointmentModal'
 import RescheduleAppointmentModal from './RescheduleAppointmentModal'
@@ -20,7 +21,9 @@ import RescheduleAppointmentModal from './RescheduleAppointmentModal'
  * - Criar bloqueio manual
  */
 const AgendaPage = () => {
-  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [searchParams, setSearchParams] = useSearchParams()
+  
+  // Estados principais
   const [appointments, setAppointments] = useState([])
   const [services, setServices] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -33,7 +36,7 @@ const AgendaPage = () => {
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false)
   const [isManualAppointmentModalOpen, setIsManualAppointmentModalOpen] = useState(false)
   const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false)
-  const [editingAppointment, setEditingAppointment] = useState(null) // Agendamento sendo editado
+  const [editingAppointment, setEditingAppointment] = useState(null)
   const [showActionMenu, setShowActionMenu] = useState(false)
   const [selectedService, setSelectedService] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -41,9 +44,26 @@ const AgendaPage = () => {
   const [appointmentsSummary, setAppointmentsSummary] = useState(null)
   const [showAppointmentsSummary, setShowAppointmentsSummary] = useState(true)
   
-  // Filtros
-  const [statusFilter, setStatusFilter] = useState('')
-  const [serviceFilter, setServiceFilter] = useState('')
+  // Filtros - inicializar a partir da URL
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '')
+  const [startDate, setStartDate] = useState(searchParams.get('start_date') ? new Date(searchParams.get('start_date')) : null)
+  const [endDate, setEndDate] = useState(searchParams.get('end_date') ? new Date(searchParams.get('end_date')) : null)
+  const [daysAhead, setDaysAhead] = useState(searchParams.get('days_ahead') ? parseInt(searchParams.get('days_ahead')) : null)
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '')
+  const [serviceFilter, setServiceFilter] = useState(searchParams.get('service_id') || '')
+  
+  // Ref para debounce
+  const searchDebounceRef = useRef(null)
+
+  // Sincronizar estados locais com URL quando ela mudar (ex: botão voltar/avançar)
+  useEffect(() => {
+    setSearchQuery(searchParams.get('search') || '')
+    setStartDate(searchParams.get('start_date') ? new Date(searchParams.get('start_date')) : null)
+    setEndDate(searchParams.get('end_date') ? new Date(searchParams.get('end_date')) : null)
+    setDaysAhead(searchParams.get('days_ahead') ? parseInt(searchParams.get('days_ahead')) : null)
+    setStatusFilter(searchParams.get('status') || '')
+    setServiceFilter(searchParams.get('service_id') || '')
+  }, [searchParams])
 
   // Formulário de bloqueio
   const [blockForm, setBlockForm] = useState({
@@ -57,10 +77,46 @@ const AgendaPage = () => {
     fetchServices()
   }, [])
 
-  // Carregar agendamentos quando a data ou filtros mudarem
+  // Função para atualizar URL com os filtros
+  const updateURLParams = useCallback((updates) => {
+    const newParams = new URLSearchParams(searchParams)
+    
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === '' || value === undefined) {
+        newParams.delete(key)
+      } else {
+        if (value instanceof Date) {
+          newParams.set(key, format(value, 'yyyy-MM-dd'))
+        } else {
+          newParams.set(key, value.toString())
+        }
+      }
+    })
+    
+    setSearchParams(newParams, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  // Debounce para busca
+  useEffect(() => {
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current)
+    }
+    
+    searchDebounceRef.current = setTimeout(() => {
+      updateURLParams({ search: searchQuery })
+    }, 300)
+    
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current)
+      }
+    }
+  }, [searchQuery, updateURLParams])
+
+  // Carregar agendamentos quando filtros mudarem
   useEffect(() => {
     fetchAppointments()
-  }, [selectedDate, statusFilter, serviceFilter])
+  }, [fetchAppointments])
 
   const fetchServices = async () => {
     try {
@@ -74,22 +130,61 @@ const AgendaPage = () => {
     }
   }
 
-  const fetchAppointments = async () => {
+  // Função para obter data atual no timezone do Brasil (America/Sao_Paulo)
+  // O backend usa UTC, mas para calcular "hoje" no Brasil, precisamos considerar o timezone
+  const getBrazilianDate = useCallback(() => {
+    const now = new Date()
+    // Obter a data atual no timezone do Brasil
+    // Usar toLocaleString para obter a data no timezone do Brasil
+    const brazilDateStr = now.toLocaleString('pt-BR', { 
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    })
+    // Criar uma nova data a partir da string formatada (sem timezone)
+    const [day, month, year] = brazilDateStr.split('/')
+    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
+  }, [])
+
+  const fetchAppointments = useCallback(async () => {
     try {
       setIsLoading(true)
       setError(null)
-      const dateStr = format(selectedDate, 'yyyy-MM-dd')
+      
+      // Obter valores atuais dos filtros da URL
+      const currentSearch = searchParams.get('search') || ''
+      const currentDaysAhead = searchParams.get('days_ahead')
+      const currentStartDate = searchParams.get('start_date')
+      const currentEndDate = searchParams.get('end_date')
+      const currentStatus = searchParams.get('status') || ''
+      const currentServiceId = searchParams.get('service_id') || ''
       
       // Construir query params
       const params = new URLSearchParams()
-      params.append('date', dateStr)
       
-      if (statusFilter) {
-        params.append('status', statusFilter)
+      // Prioridade: days_ahead sobrescreve start_date/end_date
+      if (currentDaysAhead) {
+        params.append('days_ahead', currentDaysAhead)
+      } else {
+        if (currentStartDate) {
+          params.append('start_date', currentStartDate)
+        }
+        if (currentEndDate) {
+          params.append('end_date', currentEndDate)
+        }
       }
       
-      if (serviceFilter) {
-        params.append('service_id', serviceFilter)
+      if (currentSearch) {
+        params.append('search', currentSearch)
+      }
+      
+      if (currentStatus) {
+        params.append('status', currentStatus)
+      }
+      
+      if (currentServiceId) {
+        params.append('service_id', currentServiceId)
       }
       
       const response = await api.get(`/api/v1/admin/appointments?${params.toString()}`)
@@ -100,6 +195,78 @@ const AgendaPage = () => {
     } finally {
       setIsLoading(false)
     }
+  }, [searchParams])
+
+  // Handlers para botões de atalho
+  const handleQuickFilter = (days) => {
+    setDaysAhead(days)
+    setStartDate(null)
+    setEndDate(null)
+    updateURLParams({ 
+      days_ahead: days.toString(),
+      start_date: null,
+      end_date: null
+    })
+  }
+
+  const handleToday = () => {
+    handleQuickFilter(1)
+  }
+
+  const handleNext2Days = () => {
+    handleQuickFilter(2)
+  }
+
+  const handleNext7Days = () => {
+    handleQuickFilter(7)
+  }
+
+  const handleCurrentMonth = () => {
+    const today = getBrazilianDate()
+    const monthStart = startOfMonth(today)
+    const monthEnd = endOfMonth(today)
+    
+    setDaysAhead(null)
+    setStartDate(monthStart)
+    setEndDate(monthEnd)
+    updateURLParams({
+      days_ahead: null,
+      start_date: format(monthStart, 'yyyy-MM-dd'),
+      end_date: format(monthEnd, 'yyyy-MM-dd')
+    })
+  }
+
+  // Handlers para mudanças nos filtros
+  const handleSearchChange = (value) => {
+    setSearchQuery(value)
+  }
+
+  const handleStartDateChange = (date) => {
+    setStartDate(date)
+    setDaysAhead(null) // Limpar days_ahead quando usar data customizada
+    updateURLParams({ 
+      start_date: date ? format(date, 'yyyy-MM-dd') : null,
+      days_ahead: null
+    })
+  }
+
+  const handleEndDateChange = (date) => {
+    setEndDate(date)
+    setDaysAhead(null) // Limpar days_ahead quando usar data customizada
+    updateURLParams({ 
+      end_date: date ? format(date, 'yyyy-MM-dd') : null,
+      days_ahead: null
+    })
+  }
+
+  const handleStatusFilterChange = (value) => {
+    setStatusFilter(value)
+    updateURLParams({ status: value || null })
+  }
+
+  const handleServiceFilterChange = (value) => {
+    setServiceFilter(value)
+    updateURLParams({ service_id: value || null })
   }
 
   // Buscar contagem de agendamentos futuros (notificação discreta)
@@ -445,26 +612,97 @@ const AgendaPage = () => {
           </div>
         </div>
         
-        {/* Seletor de Data - Destaque */}
-        <Card className="p-4 bg-primary/5 border-2 border-primary/20">
-          <div className="flex items-center gap-3">
-            <label className="text-sm font-bold text-text">
-              📅 Selecione a Data:
+        {/* Barra de Ferramentas de Filtros */}
+        <Card className="p-4 space-y-4">
+          {/* Campo de Busca */}
+          <div>
+            <label className="block text-sm font-semibold text-text mb-2">
+              🔍 Buscar por Cliente
             </label>
-            <DatePicker
-              selected={selectedDate}
-              onChange={(date) => setSelectedDate(date)}
-              dateFormat="dd/MM/yyyy"
-              locale={ptBR}
-              className="px-4 py-2 border-2 border-primary rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent font-semibold"
-              wrapperClassName="flex-1 sm:flex-none"
+            <Input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder="Digite o nome do cliente ou e-mail..."
+              className="w-full"
             />
           </div>
-        </Card>
-        
-        {/* Filtros */}
-        <Card className="p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+          {/* Botões de Atalho (Quick Filters) */}
+          <div>
+            <label className="block text-sm font-semibold text-text mb-2">
+              ⚡ Filtros Rápidos
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant={daysAhead === 1 ? "primary" : "secondary"}
+                onClick={handleToday}
+                className="text-sm"
+              >
+                Hoje
+              </Button>
+              <Button
+                type="button"
+                variant={daysAhead === 2 ? "primary" : "secondary"}
+                onClick={handleNext2Days}
+                className="text-sm"
+              >
+                Próximos 2 dias
+              </Button>
+              <Button
+                type="button"
+                variant={daysAhead === 7 ? "primary" : "secondary"}
+                onClick={handleNext7Days}
+                className="text-sm"
+              >
+                Próximos 7 dias
+              </Button>
+              <Button
+                type="button"
+                variant={!daysAhead && startDate && endDate ? "primary" : "secondary"}
+                onClick={handleCurrentMonth}
+                className="text-sm"
+              >
+                Mês Atual
+              </Button>
+            </div>
+          </div>
+
+          {/* Filtro de Período Customizado */}
+          <div>
+            <label className="block text-sm font-semibold text-text mb-2">
+              📅 Período Customizado
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">De</label>
+                <DatePicker
+                  selected={startDate}
+                  onChange={handleStartDateChange}
+                  dateFormat="dd/MM/yyyy"
+                  locale={ptBR}
+                  placeholderText="Data inicial"
+                  className="w-full px-3 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Até</label>
+                <DatePicker
+                  selected={endDate}
+                  onChange={handleEndDateChange}
+                  dateFormat="dd/MM/yyyy"
+                  locale={ptBR}
+                  placeholderText="Data final"
+                  minDate={startDate || undefined}
+                  className="w-full px-3 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Filtros Adicionais */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-gray-200">
             {/* Filtro de Status */}
             <div>
               <label className="block text-sm font-semibold text-text mb-2">
@@ -472,7 +710,7 @@ const AgendaPage = () => {
               </label>
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => handleStatusFilterChange(e.target.value)}
                 className="w-full px-4 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
               >
                 <option value="">Todos os Status</option>
@@ -490,7 +728,7 @@ const AgendaPage = () => {
               </label>
               <select
                 value={serviceFilter}
-                onChange={(e) => setServiceFilter(e.target.value)}
+                onChange={(e) => handleServiceFilterChange(e.target.value)}
                 disabled={isLoadingServices}
                 className="w-full px-4 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:bg-gray-100"
               >
