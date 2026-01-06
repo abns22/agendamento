@@ -362,9 +362,25 @@ async def list_appointments(
             
             if start_date:
                 try:
-                    start_dt = datetime.strptime(start_date, '%Y-%m-%d').replace(
-                        hour=0, minute=0, second=0, microsecond=0
+                    # Parse da data como timezone-naive (sem timezone)
+                    # Considerar que a data vem do timezone do Brasil (America/Sao_Paulo, UTC-3)
+                    # Converter para UTC para comparação com start_datetime (que está em UTC no banco)
+                    try:
+                        from zoneinfo import ZoneInfo
+                        brazil_tz = ZoneInfo('America/Sao_Paulo')
+                        utc_tz = ZoneInfo('UTC')
+                    except ImportError:
+                        # Fallback para Python < 3.9 ou sistemas sem zoneinfo
+                        from datetime import timezone as dt_timezone
+                        brazil_tz = dt_timezone(timedelta(hours=-3))  # UTC-3 para São Paulo
+                        utc_tz = dt_timezone.utc
+                    
+                    # Criar datetime no timezone do Brasil às 00:00:00
+                    start_dt_brazil = datetime.strptime(start_date, '%Y-%m-%d').replace(
+                        hour=0, minute=0, second=0, microsecond=0, tzinfo=brazil_tz
                     )
+                    # Converter para UTC (mantendo o mesmo momento no tempo)
+                    start_dt = start_dt_brazil.astimezone(utc_tz).replace(tzinfo=None)
                     conditions.append(Appointment.start_datetime >= start_dt)
                 except ValueError:
                     raise HTTPException(
@@ -374,9 +390,25 @@ async def list_appointments(
             
             if end_date:
                 try:
-                    end_dt = datetime.strptime(end_date, '%Y-%m-%d').replace(
-                        hour=23, minute=59, second=59, microsecond=999999
+                    # Parse da data como timezone-naive (sem timezone)
+                    # Considerar que a data vem do timezone do Brasil (America/Sao_Paulo, UTC-3)
+                    # Converter para UTC para comparação com start_datetime (que está em UTC no banco)
+                    try:
+                        from zoneinfo import ZoneInfo
+                        brazil_tz = ZoneInfo('America/Sao_Paulo')
+                        utc_tz = ZoneInfo('UTC')
+                    except ImportError:
+                        # Fallback para Python < 3.9 ou sistemas sem zoneinfo
+                        from datetime import timezone as dt_timezone
+                        brazil_tz = dt_timezone(timedelta(hours=-3))  # UTC-3 para São Paulo
+                        utc_tz = dt_timezone.utc
+                    
+                    # Criar datetime no timezone do Brasil às 23:59:59.999999
+                    end_dt_brazil = datetime.strptime(end_date, '%Y-%m-%d').replace(
+                        hour=23, minute=59, second=59, microsecond=999999, tzinfo=brazil_tz
                     )
+                    # Converter para UTC (mantendo o mesmo momento no tempo)
+                    end_dt = end_dt_brazil.astimezone(utc_tz).replace(tzinfo=None)
                     conditions.append(Appointment.start_datetime <= end_dt)
                 except ValueError:
                     raise HTTPException(
@@ -679,40 +711,23 @@ async def update_appointment(
         appointment.total_value = total_value
         
         # Atualizar relacionamento com serviços
-        # Primeiro, remover serviços antigos
-        await db.refresh(appointment, ['services'])
-        if appointment.services:
-            for old_service in appointment.services:
-                # Buscar e deletar AppointmentService
-                appointment_service_query = select(AppointmentServiceModel).where(
-                    and_(
-                        AppointmentServiceModel.appointment_id == appointment_id_str,
-                        AppointmentServiceModel.service_id == str(old_service.id)
-                    )
-                )
-                appointment_service_result = await db.execute(appointment_service_query)
-                appointment_service = appointment_service_result.scalar_one_or_none()
-                if appointment_service:
-                    await db.delete(appointment_service)
+        # Primeiro, buscar e remover todos os AppointmentService antigos
+        old_appointment_services_query = select(AppointmentServiceModel).where(
+            AppointmentServiceModel.appointment_id == appointment_id_str
+        )
+        old_appointment_services_result = await db.execute(old_appointment_services_query)
+        old_appointment_services = old_appointment_services_result.scalars().all()
+        
+        for old_appointment_service in old_appointment_services:
+            await db.delete(old_appointment_service)
         
         # Adicionar novos serviços
         for service in services_to_use:
-            # Verificar se já existe
-            existing_query = select(AppointmentServiceModel).where(
-                and_(
-                    AppointmentServiceModel.appointment_id == appointment_id_str,
-                    AppointmentServiceModel.service_id == str(service.id)
-                )
+            new_appointment_service = AppointmentServiceModel(
+                appointment_id=appointment_id_str,
+                service_id=str(service.id)
             )
-            existing_result = await db.execute(existing_query)
-            existing = existing_result.scalar_one_or_none()
-            
-            if not existing:
-                new_appointment_service = AppointmentServiceModel(
-                    appointment_id=appointment_id_str,
-                    service_id=str(service.id)
-                )
-                db.add(new_appointment_service)
+            db.add(new_appointment_service)
         
         # Atualizar service_id para compatibilidade (primeiro serviço)
         if services_to_use:
@@ -728,8 +743,12 @@ async def update_appointment(
                 detail=f"Status inválido. Use: PENDING, CONFIRMED, CANCELED, COMPLETED"
             )
     
+    # Fazer flush para garantir que todas as mudanças sejam enviadas ao banco
+    await db.flush()
     await db.commit()
-    await db.refresh(appointment)
+    
+    # Recarregar appointment com todos os relacionamentos após commit
+    await db.refresh(appointment, ['services', 'client'])
     
     return await build_appointment_response(appointment, db)
 

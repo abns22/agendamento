@@ -106,17 +106,87 @@ async def get_cash_summary(
         
         # Função auxiliar para calcular resumo de um período
         async def calculate_summary(start_dt, end_dt):
-            # Buscar transações do período (apenas as pagas, pois as não pagas não entram no caixa ainda)
-            transactions_query = select(Transaction).where(
+            # NOVA LÓGICA: Buscar PaymentEntry que devem entrar no caixa do período
+            # 1. PaymentEntry de transações com date_time no período (pagamentos imediatos)
+            # 2. PaymentEntry de contas a receber baixadas no período (usando Debtor.paid_at)
+            from app.models.debtor import Debtor, DebtorStatus
+            
+            # Buscar PaymentEntry de transações com date_time no período (pagamentos imediatos)
+            payment_entries_immediate_query = select(PaymentEntry).join(
+                Transaction, PaymentEntry.transaction_id == Transaction.id
+            ).where(
                 and_(
                     Transaction.tenant_id == tenant_id_str,
                     Transaction.date_time >= start_dt,
                     Transaction.date_time <= end_dt,
-                    Transaction.is_paid == True  # Apenas transações pagas entram no caixa
+                    Transaction.is_paid == True
                 )
+            )
+            payment_entries_immediate_result = await db.execute(payment_entries_immediate_query)
+            payment_entries_immediate = payment_entries_immediate_result.scalars().all()
+            
+            # Buscar PaymentEntry de contas a receber baixadas no período
+            # (usando Debtor.paid_at para determinar quando foi pago)
+            debtors_paid_query = select(Debtor).join(
+                Transaction, Debtor.transaction_id == Transaction.id
+            ).where(
+                and_(
+                    Transaction.tenant_id == tenant_id_str,
+                    Debtor.status == DebtorStatus.PAID,
+                    Debtor.paid_at >= start_dt,
+                    Debtor.paid_at <= end_dt
+                )
+            )
+            debtors_paid_result = await db.execute(debtors_paid_query)
+            debtors_paid = debtors_paid_result.scalars().all()
+            
+            # Obter transaction_ids das contas a receber baixadas
+            debtor_transaction_ids = [str(d.transaction_id) for d in debtors_paid]
+            
+            # Buscar PaymentEntry dessas transações (criados quando a conta foi baixada)
+            payment_entries_settled = []
+            if debtor_transaction_ids:
+                payment_entries_settled_query = select(PaymentEntry).where(
+                    PaymentEntry.transaction_id.in_(debtor_transaction_ids)
+                )
+                payment_entries_settled_result = await db.execute(payment_entries_settled_query)
+                payment_entries_settled = payment_entries_settled_result.scalars().all()
+            
+            # Combinar todos os PaymentEntry do período
+            payment_entries = list(payment_entries_immediate) + list(payment_entries_settled)
+            
+            # Obter transaction_ids únicos
+            transaction_ids = list(set([pe.transaction_id for pe in payment_entries]))
+            
+            if not transaction_ids:
+                # Se não há PaymentEntry no período, retornar zeros
+                return {
+                    'period_start': start_dt,
+                    'period_end': end_dt,
+                    'gross_revenue': Decimal('0.00'),
+                    'net_revenue': Decimal('0.00'),
+                    'total_service_cost': Decimal('0.00'),
+                    'total_additional_cost': Decimal('0.00'),
+                    'total_cost': Decimal('0.00'),
+                    'total_profit': Decimal('0.00'),
+                    'total_expenses': Decimal('0.00'),
+                    'payment_methods_summary': [],
+                    'total_transactions': 0,
+                    'total_appointments': 0
+                }
+            
+            # Buscar transações relacionadas aos PaymentEntry
+            transactions_query = select(Transaction).where(
+                Transaction.id.in_(transaction_ids)
             )
             transactions_result = await db.execute(transactions_query)
             transactions = transactions_result.scalars().all()
+            
+            # Criar mapa de transações para acesso rápido
+            transactions_map = {str(t.id): t for t in transactions}
+            
+            # Criar mapa de Debtor.paid_at por transaction_id para determinar data de pagamento
+            debtor_paid_at_map = {str(d.transaction_id): d.paid_at for d in debtors_paid if d.paid_at}
             
             # Calcular totais
             gross_revenue = Decimal('0.00')
@@ -124,26 +194,50 @@ async def get_cash_summary(
             total_service_cost = Decimal('0.00')
             total_additional_cost = Decimal('0.00')
             total_profit = Decimal('0.00')
-            total_transactions = len(transactions)
+            total_transactions = len(set(transaction_ids))
             
             # Resumo por forma de pagamento
             payment_methods_map = {}
             
-            for transaction in transactions:
-                # Buscar payment entries desta transação (apenas valores pagos imediatamente)
-                payment_entries_query = select(PaymentEntry).where(
-                    PaymentEntry.transaction_id == str(transaction.id)
-                )
-                payment_entries_result = await db.execute(payment_entries_query)
-                payment_entries = payment_entries_result.scalars().all()
+            # Agrupar PaymentEntry por transaction_id para calcular proporções corretas
+            payment_entries_by_transaction = {}
+            for pe in payment_entries:
+                if pe.transaction_id not in payment_entries_by_transaction:
+                    payment_entries_by_transaction[pe.transaction_id] = []
+                payment_entries_by_transaction[pe.transaction_id].append(pe)
+            
+            for transaction_id, payment_entries_list in payment_entries_by_transaction.items():
+                transaction = transactions_map.get(transaction_id)
+                if not transaction:
+                    continue
                 
-                # IMPORTANTE: Calcular apenas valores pagos imediatamente (PaymentEntry)
-                # Não incluir valores a receber (Debtor) até que sejam pagos
-                total_paid_immediately = Decimal('0.00')
+                # Determinar se este PaymentEntry deve entrar no período
+                # Se é de uma conta a receber baixada, usar paid_at
+                # Se é pagamento imediato, usar transaction.date_time
+                is_settled_debtor = transaction_id in debtor_paid_at_map
                 
-                for pe in payment_entries:
-                    # Somar apenas valores pagos imediatamente
-                    total_paid_immediately += Decimal(str(pe.value_paid))
+                # Filtrar PaymentEntry que devem entrar no período
+                payment_entries_in_period = []
+                for pe in payment_entries_list:
+                    if is_settled_debtor:
+                        # Se é conta a receber baixada, verificar se paid_at está no período
+                        paid_at = debtor_paid_at_map.get(transaction_id)
+                        if paid_at and start_dt <= paid_at <= end_dt:
+                            payment_entries_in_period.append(pe)
+                    else:
+                        # Se é pagamento imediato, verificar se transaction.date_time está no período
+                        if start_dt <= transaction.date_time <= end_dt:
+                            payment_entries_in_period.append(pe)
+                
+                if not payment_entries_in_period:
+                    continue
+                
+                # Calcular total pago no período
+                total_paid_in_period = Decimal('0.00')
+                
+                for pe in payment_entries_in_period:
+                    # Somar apenas valores pagos no período
+                    total_paid_in_period += Decimal(str(pe.value_paid))
                     
                     # Buscar nome da forma de pagamento
                     payment_method_query = select(PaymentMethodConfig).where(
@@ -161,28 +255,15 @@ async def get_cash_summary(
                             }
                         payment_methods_map[method_name]['total_received'] += Decimal(str(pe.value_paid))
                 
-                # Se não há payment entries, a transação não teve pagamento imediato
-                # (foi totalmente a prazo), então não deve entrar no resumo do caixa
-                if len(payment_entries) == 0:
-                    continue
-                
                 # Calcular valor final após desconto (usado para proporções)
                 discount_value = Decimal(str(transaction.discount)) if transaction.discount else Decimal('0.00')
                 final_value_after_discount = transaction.gross_value - discount_value
                 
-                # Calcular valores proporcionais apenas do que foi pago imediatamente
-                # Proporção do valor pago em relação ao valor final após desconto
-                if final_value_after_discount > Decimal('0.00'):
-                    paid_proportion = total_paid_immediately / final_value_after_discount
-                    gross_revenue += total_paid_immediately  # Valor pago imediatamente (já com desconto aplicado)
-                    net_revenue += transaction.net_value * paid_proportion  # Valor líquido proporcional
-                    total_profit += transaction.total_profit * paid_proportion  # Lucro proporcional
-                else:
-                    gross_revenue += total_paid_immediately
-                    net_revenue += transaction.net_value
-                    total_profit += transaction.total_profit
+                # REGRA: Se product_cost ou service_cost estão zerados/nulos, líquido = bruto
+                has_cost = False
+                service_cost_value = Decimal('0.00')
+                additional_cost_value = Decimal(str(transaction.additional_cost)) if transaction.additional_cost else Decimal('0.00')
                 
-                # Calcular custo proporcional (sem additional_cost duplicado)
                 if transaction.appointment_id:
                     appointment_query = select(Appointment).where(
                         Appointment.id == str(transaction.appointment_id)
@@ -190,20 +271,36 @@ async def get_cash_summary(
                     appointment_result = await db.execute(appointment_query)
                     appointment = appointment_result.scalar_one_or_none()
                     if appointment and appointment.service_cost:
-                        # Custo proporcional ao valor pago (usando valor após desconto)
-                        if final_value_after_discount > Decimal('0.00'):
-                            cost_proportion = total_paid_immediately / final_value_after_discount
-                            total_service_cost += Decimal(str(appointment.service_cost)) * cost_proportion
-                        else:
-                            total_service_cost += Decimal(str(appointment.service_cost))
+                        service_cost_value = Decimal(str(appointment.service_cost))
+                        has_cost = True
                 
                 if transaction.additional_cost:
-                    # Custo adicional proporcional ao valor pago (usando valor após desconto)
-                    if final_value_after_discount > Decimal('0.00'):
-                        cost_proportion = total_paid_immediately / final_value_after_discount
-                        total_additional_cost += Decimal(str(transaction.additional_cost)) * cost_proportion
-                    else:
-                        total_additional_cost += Decimal(str(transaction.additional_cost))
+                    has_cost = True
+                
+                # Calcular proporção do valor pago no período
+                if final_value_after_discount > Decimal('0.00'):
+                    paid_proportion = total_paid_in_period / final_value_after_discount
+                else:
+                    paid_proportion = Decimal('1.00') if total_paid_in_period > Decimal('0.00') else Decimal('0.00')
+                
+                # REGRA: Se não há custos, líquido = bruto
+                if not has_cost or (service_cost_value == Decimal('0.00') and additional_cost_value == Decimal('0.00')):
+                    # Líquido = Bruto (sem descontar custos)
+                    gross_revenue += total_paid_in_period
+                    net_revenue += total_paid_in_period
+                    # Lucro = Líquido (já que não há custos)
+                    total_profit += total_paid_in_period
+                else:
+                    # Calcular valores proporcionais
+                    gross_revenue += total_paid_in_period
+                    net_revenue += transaction.net_value * paid_proportion
+                    total_profit += transaction.total_profit * paid_proportion
+                    
+                    # Calcular custos proporcionais
+                    if service_cost_value > Decimal('0.00'):
+                        total_service_cost += service_cost_value * paid_proportion
+                    if additional_cost_value > Decimal('0.00'):
+                        total_additional_cost += additional_cost_value * paid_proportion
             
             total_cost = total_service_cost + total_additional_cost
             

@@ -836,8 +836,15 @@ const AgendaPage = () => {
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
-                  {/* Horário em Destaque */}
+                  {/* Data e Horário em Destaque */}
                   <div className="mb-3">
+                    {/* Data */}
+                    <div className="mb-2">
+                      <span className="text-sm font-semibold text-gray-600">
+                        {format(new Date(apt.start_datetime), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                      </span>
+                    </div>
+                    {/* Horário */}
                     <div className="flex items-baseline gap-2">
                       <span 
                         className="text-3xl sm:text-4xl font-bold"

@@ -370,8 +370,23 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
           start_datetime: utcDateTime.toISOString()
         }
         
+        console.log('📝 Editando agendamento:', {
+          appointmentId: appointment.id,
+          payload,
+          originalServices: appointment.service_ids,
+          newServices: payload.service_ids,
+          originalDateTime: appointment.start_datetime,
+          newDateTime: payload.start_datetime
+        })
+        
         try {
-          await api.put(`/api/v1/admin/appointments/${appointment.id}`, payload)
+          const response = await api.put(`/api/v1/admin/appointments/${appointment.id}`, payload)
+          console.log('✅ Agendamento atualizado com sucesso:', response.data)
+          
+          // Chamar onSuccess ANTES de fechar o modal para garantir que a lista seja atualizada
+          if (onSuccess) {
+            await onSuccess() // Aguardar a atualização da lista
+          }
           
           // Feedback visual de sucesso
           try {
@@ -382,13 +397,14 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
             // Ignorar falhas em alert
           }
           
-          if (onSuccess) {
-            onSuccess()
-          }
-          
           onClose()
         } catch (err) {
-          console.error('Erro ao atualizar agendamento:', err)
+          console.error('❌ Erro ao atualizar agendamento:', err)
+          console.error('Detalhes do erro:', {
+            status: err.response?.status,
+            data: err.response?.data,
+            message: err.message
+          })
           
           // Tratar erro 409 (conflito de horário)
           if (err.response?.status === 409) {
