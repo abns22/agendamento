@@ -103,9 +103,16 @@ async def stripe_webhook(
         
         # Processar evento conforme o tipo
         event_type = event['type']
+        event_id = event.get('id', 'unknown')
         event_data = event['data']['object']
         
-        logger.info(f"Processando evento Stripe: {event_type}")
+        # Log detalhado do evento recebido
+        logger.info(
+            f"💰 WEBHOOK RECEBIDO - Evento: {event_type} | "
+            f"ID: {event_id} | "
+            f"Timestamp: {datetime.utcnow().isoformat()} | "
+            f"Objeto: {event_data.get('id', 'N/A') if isinstance(event_data, dict) else 'N/A'}"
+        )
         
         # Processar eventos usando match case (Python 3.10+) ou if/elif
         match event_type:
@@ -123,7 +130,10 @@ async def stripe_webhook(
             
             case _:
                 # Evento não processado, mas não é erro
-                logger.info(f"Evento {event_type} recebido mas não processado")
+                logger.info(
+                    f"ℹ️ Evento {event_type} recebido mas não processado | "
+                    f"Event ID: {event_id}"
+                )
         
         # Retornar JSON vazio com status 200 OK para o Stripe
         return JSONResponse(
@@ -158,12 +168,27 @@ async def handle_checkout_session_completed(
         session_data: Dados da sessão de checkout do Stripe
         db: Sessão do banco de dados
     """
+    session_id = session_data.get('id', 'unknown')
+    customer_id = session_data.get('customer', 'unknown')
+    amount_total = session_data.get('amount_total', 0)
+    currency = session_data.get('currency', 'brl')
+    
+    logger.info(
+        f"💳 CHECKOUT COMPLETED - Session: {session_id} | "
+        f"Customer: {customer_id} | "
+        f"Valor: {amount_total/100 if amount_total else 0} {currency.upper()}"
+    )
+    
     try:
         # Obter subscription_id da sessão
         subscription_id = session_data.get('subscription')
         
         if not subscription_id:
-            logger.warning("Checkout session sem subscription_id")
+            logger.error(
+                f"❌ ERRO: Checkout session {session_id} sem subscription_id | "
+                f"Customer: {customer_id} | "
+                f"Dados: {session_data}"
+            )
             return
         
         # Obter tenant_id dos metadados
@@ -171,14 +196,24 @@ async def handle_checkout_session_completed(
         tenant_id_str = metadata.get('tenant_id')
         
         if not tenant_id_str:
-            logger.warning("Checkout session sem tenant_id nos metadados")
+            logger.error(
+                f"❌ ERRO: Checkout session {session_id} sem tenant_id nos metadados | "
+                f"Subscription: {subscription_id} | "
+                f"Customer: {customer_id} | "
+                f"Metadata: {metadata}"
+            )
             return
         
         # Validar formato UUID (mas usar string para MySQL)
         try:
             UUID(tenant_id_str)  # Validar formato
         except ValueError:
-            logger.error(f"tenant_id inválido: {tenant_id_str}")
+            logger.error(
+                f"❌ ERRO: tenant_id inválido no checkout | "
+                f"Session: {session_id} | "
+                f"Subscription: {subscription_id} | "
+                f"Tenant ID recebido: {tenant_id_str}"
+            )
             return
         
         # Buscar tenant
@@ -188,37 +223,98 @@ async def handle_checkout_session_completed(
         tenant = result.scalar_one_or_none()
         
         if not tenant:
-            logger.error(f"Tenant não encontrado: {tenant_id_str}")
+            logger.error(
+                f"❌ ERRO: Tenant não encontrado no checkout | "
+                f"Session: {session_id} | "
+                f"Subscription: {subscription_id} | "
+                f"Tenant ID: {tenant_id_str} | "
+                f"Customer: {customer_id}"
+            )
             return
+        
+        logger.info(
+            f"✅ Tenant encontrado para checkout | "
+            f"Tenant ID: {tenant_id_str} | "
+            f"Subscription: {subscription_id} | "
+            f"Session: {session_id}"
+        )
         
         # Buscar dados da subscription no Stripe para obter current_period_end
         stripe.api_key = settings.STRIPE_SECRET_KEY
         try:
             subscription = stripe.Subscription.retrieve(subscription_id)
             current_period_end = datetime.fromtimestamp(subscription.current_period_end)
-            customer_id = subscription.customer
+            customer_id_from_sub = subscription.customer
+            subscription_status_stripe = subscription.status
+            
+            logger.info(
+                f"📊 Subscription recuperada do Stripe | "
+                f"Subscription: {subscription_id} | "
+                f"Status: {subscription_status_stripe} | "
+                f"Period End: {current_period_end} | "
+                f"Customer: {customer_id_from_sub}"
+            )
         except stripe.error.StripeError as e:
-            logger.error(f"Erro ao buscar subscription no Stripe: {str(e)}")
+            logger.error(
+                f"❌ ERRO ao buscar subscription no Stripe | "
+                f"Subscription ID: {subscription_id} | "
+                f"Tenant ID: {tenant_id_str} | "
+                f"Session: {session_id} | "
+                f"Erro: {str(e)} | "
+                f"Tipo: {type(e).__name__}"
+            )
             # Continuar mesmo sem os dados da subscription
             current_period_end = None
-            customer_id = session_data.get('customer')
+            customer_id_from_sub = session_data.get('customer')
         
         # Atualizar tenant
+        old_subscription_id = tenant.stripe_subscription_id
+        old_status = tenant.subscription_status
+        old_customer_id = tenant.stripe_customer_id
+        
         tenant.stripe_subscription_id = subscription_id
         tenant.subscription_status = 'active'
         if current_period_end:
             tenant.current_period_end = current_period_end
-        if customer_id and not tenant.stripe_customer_id:
-            tenant.stripe_customer_id = customer_id
+        if customer_id_from_sub and not tenant.stripe_customer_id:
+            tenant.stripe_customer_id = customer_id_from_sub
         
-        await db.commit()
-        await db.refresh(tenant)
-        
-        logger.info(f"Tenant {tenant_id_str} ativado com subscription {subscription_id}, status='active', period_end={current_period_end}")
+        try:
+            await db.commit()
+            await db.refresh(tenant)
+            
+            logger.info(
+                f"✅ CHECKOUT PROCESSADO COM SUCESSO | "
+                f"Tenant ID: {tenant_id_str} | "
+                f"Subscription: {subscription_id} (anterior: {old_subscription_id}) | "
+                f"Status: active (anterior: {old_status}) | "
+                f"Customer: {customer_id_from_sub} (anterior: {old_customer_id}) | "
+                f"Period End: {current_period_end} | "
+                f"Session: {session_id}"
+            )
+        except Exception as db_error:
+            await db.rollback()
+            logger.error(
+                f"❌ ERRO ao salvar no banco após checkout | "
+                f"Tenant ID: {tenant_id_str} | "
+                f"Subscription: {subscription_id} | "
+                f"Session: {session_id} | "
+                f"Erro: {str(db_error)}",
+                exc_info=True
+            )
+            raise
         
     except Exception as e:
         await db.rollback()
-        logger.error(f"Erro ao processar checkout.session.completed: {str(e)}", exc_info=True)
+        logger.error(
+            f"❌ ERRO CRÍTICO ao processar checkout.session.completed | "
+            f"Session: {session_id} | "
+            f"Subscription: {subscription_id if 'subscription_id' in locals() else 'N/A'} | "
+            f"Tenant ID: {tenant_id_str if 'tenant_id_str' in locals() else 'N/A'} | "
+            f"Erro: {str(e)} | "
+            f"Tipo: {type(e).__name__}",
+            exc_info=True
+        )
         raise
 
 
@@ -237,12 +333,27 @@ async def handle_invoice_paid(
         invoice_data: Dados da invoice do Stripe
         db: Sessão do banco de dados
     """
+    invoice_id = invoice_data.get('id', 'unknown')
+    amount_paid = invoice_data.get('amount_paid', 0)
+    currency = invoice_data.get('currency', 'brl')
+    customer_id = invoice_data.get('customer', 'unknown')
+    
+    logger.info(
+        f"💵 INVOICE PAID - Invoice: {invoice_id} | "
+        f"Customer: {customer_id} | "
+        f"Valor: {amount_paid/100 if amount_paid else 0} {currency.upper()}"
+    )
+    
     try:
         # Obter subscription_id da invoice
         subscription_id = invoice_data.get('subscription')
         
         if not subscription_id:
-            logger.warning("Invoice sem subscription_id")
+            logger.error(
+                f"❌ ERRO: Invoice {invoice_id} sem subscription_id | "
+                f"Customer: {customer_id} | "
+                f"Dados: {invoice_data}"
+            )
             return
         
         # Buscar tenant pelo subscription_id
@@ -257,31 +368,79 @@ async def handle_invoice_paid(
         
         # Buscar dados da subscription no Stripe para obter current_period_end
         stripe.api_key = settings.STRIPE_SECRET_KEY
+        old_period_end = tenant.current_period_end
+        old_status = tenant.subscription_status
+        
         try:
             subscription = stripe.Subscription.retrieve(subscription_id)
             current_period_end = datetime.fromtimestamp(subscription.current_period_end)
+            subscription_status_stripe = subscription.status
+            
+            logger.info(
+                f"📊 Subscription recuperada para invoice paga | "
+                f"Subscription: {subscription_id} | "
+                f"Status: {subscription_status_stripe} | "
+                f"Novo Period End: {current_period_end}"
+            )
         except stripe.error.StripeError as e:
-            logger.error(f"Erro ao buscar subscription no Stripe: {str(e)}")
+            logger.error(
+                f"❌ ERRO ao buscar subscription no Stripe para invoice paga | "
+                f"Subscription ID: {subscription_id} | "
+                f"Tenant ID: {tenant.id} | "
+                f"Invoice: {invoice_id} | "
+                f"Erro: {str(e)} | "
+                f"Tipo: {type(e).__name__}"
+            )
             # Tentar usar period_end da invoice se disponível
             period_end = invoice_data.get('period_end')
             if period_end:
                 current_period_end = datetime.fromtimestamp(period_end)
+                logger.info(f"✅ Usando period_end da invoice: {current_period_end}")
             else:
                 current_period_end = None
+                logger.warning(f"⚠️ Period end não disponível nem na subscription nem na invoice")
         
         # Atualizar tenant
         tenant.subscription_status = 'active'
         if current_period_end:
             tenant.current_period_end = current_period_end
         
-        await db.commit()
-        await db.refresh(tenant)
-        
-        logger.info(f"Tenant {tenant.id} renovação paga, atualizado period_end={current_period_end}")
+        try:
+            await db.commit()
+            await db.refresh(tenant)
+            
+            logger.info(
+                f"✅ INVOICE PAID PROCESSADA COM SUCESSO | "
+                f"Tenant ID: {tenant.id} | "
+                f"Subscription: {subscription_id} | "
+                f"Invoice: {invoice_id} | "
+                f"Status: active (anterior: {old_status}) | "
+                f"Period End: {current_period_end} (anterior: {old_period_end}) | "
+                f"Valor: {amount_paid/100 if amount_paid else 0} {currency.upper()}"
+            )
+        except Exception as db_error:
+            await db.rollback()
+            logger.error(
+                f"❌ ERRO ao salvar no banco após invoice paga | "
+                f"Tenant ID: {tenant.id} | "
+                f"Subscription: {subscription_id} | "
+                f"Invoice: {invoice_id} | "
+                f"Erro: {str(db_error)}",
+                exc_info=True
+            )
+            raise
         
     except Exception as e:
         await db.rollback()
-        logger.error(f"Erro ao processar invoice.paid: {str(e)}", exc_info=True)
+        logger.error(
+            f"❌ ERRO CRÍTICO ao processar invoice.paid | "
+            f"Invoice: {invoice_id} | "
+            f"Subscription: {subscription_id if 'subscription_id' in locals() else 'N/A'} | "
+            f"Tenant ID: {tenant.id if 'tenant' in locals() else 'N/A'} | "
+            f"Erro: {str(e)} | "
+            f"Tipo: {type(e).__name__}",
+            exc_info=True
+        )
         raise
 
 
@@ -298,12 +457,25 @@ async def handle_subscription_deleted(
         subscription_data: Dados da subscription do Stripe
         db: Sessão do banco de dados
     """
+    subscription_id = subscription_data.get('id', 'unknown')
+    customer_id = subscription_data.get('customer', 'unknown')
+    canceled_at = subscription_data.get('canceled_at')
+    cancel_at_period_end = subscription_data.get('cancel_at_period_end', False)
+    
+    logger.warning(
+        f"🗑️ SUBSCRIPTION DELETED - Subscription: {subscription_id} | "
+        f"Customer: {customer_id} | "
+        f"Cancel at period end: {cancel_at_period_end} | "
+        f"Canceled at: {datetime.fromtimestamp(canceled_at) if canceled_at else 'N/A'}"
+    )
+    
     try:
-        # Obter subscription_id
-        subscription_id = subscription_data.get('id')
-        
         if not subscription_id:
-            logger.warning("Subscription deleted event sem subscription_id")
+            logger.error(
+                f"❌ ERRO: Subscription deleted event sem subscription_id | "
+                f"Customer: {customer_id} | "
+                f"Dados: {subscription_data}"
+            )
             return
         
         # Buscar tenant pelo subscription_id
@@ -313,19 +485,52 @@ async def handle_subscription_deleted(
         tenant = result.scalar_one_or_none()
         
         if not tenant:
-            logger.warning(f"Tenant não encontrado para subscription {subscription_id}")
+            logger.error(
+                f"❌ ERRO: Tenant não encontrado para subscription deletada | "
+                f"Subscription: {subscription_id} | "
+                f"Customer: {customer_id}"
+            )
             return
+        
+        old_is_active = tenant.is_active
         
         # Desativar tenant (cliente cancelou)
         tenant.is_active = False
-        await db.commit()
-        await db.refresh(tenant)
         
-        logger.info(f"Tenant {tenant.id} desativado devido a cancelamento de assinatura")
+        try:
+            await db.commit()
+            await db.refresh(tenant)
+            
+            logger.warning(
+                f"⚠️ SUBSCRIPTION DELETED PROCESSADA | "
+                f"Tenant ID: {tenant.id} | "
+                f"Subscription: {subscription_id} | "
+                f"Customer: {customer_id} | "
+                f"is_active: False (anterior: {old_is_active}) | "
+                f"Cancel at period end: {cancel_at_period_end}"
+            )
+        except Exception as db_error:
+            await db.rollback()
+            logger.error(
+                f"❌ ERRO ao desativar tenant após subscription deletada | "
+                f"Tenant ID: {tenant.id} | "
+                f"Subscription: {subscription_id} | "
+                f"Erro: {str(db_error)}",
+                exc_info=True
+            )
+            raise
         
     except Exception as e:
         await db.rollback()
-        logger.error(f"Erro ao processar customer.subscription.deleted: {str(e)}", exc_info=True)
+        logger.error(
+            f"❌ ERRO CRÍTICO ao processar customer.subscription.deleted | "
+            f"Subscription: {subscription_id} | "
+            f"Customer: {customer_id} | "
+            f"Tenant ID: {tenant.id if 'tenant' in locals() else 'N/A'} | "
+            f"Erro: {str(e)} | "
+            f"Tipo: {type(e).__name__}",
+            exc_info=True
+        )
         raise
 
 
@@ -346,12 +551,30 @@ async def handle_invoice_payment_failed(
         invoice_data: Dados da invoice do Stripe
         db: Sessão do banco de dados
     """
+    invoice_id = invoice_data.get('id', 'unknown')
+    amount_due = invoice_data.get('amount_due', 0)
+    currency = invoice_data.get('currency', 'brl')
+    customer_id = invoice_data.get('customer', 'unknown')
+    attempt_count = invoice_data.get('attempt_count', 0)
+    
+    logger.warning(
+        f"⚠️ INVOICE PAYMENT FAILED - Invoice: {invoice_id} | "
+        f"Customer: {customer_id} | "
+        f"Valor devido: {amount_due/100 if amount_due else 0} {currency.upper()} | "
+        f"Tentativas: {attempt_count}"
+    )
+    
     try:
         # Obter subscription_id da invoice
         subscription_id = invoice_data.get('subscription')
         
         if not subscription_id:
-            logger.warning("Invoice sem subscription_id")
+            logger.error(
+                f"❌ ERRO: Invoice {invoice_id} de pagamento falhado sem subscription_id | "
+                f"Customer: {customer_id} | "
+                f"Valor: {amount_due/100 if amount_due else 0} {currency.upper()} | "
+                f"Dados: {invoice_data}"
+            )
             return
         
         # Buscar tenant pelo subscription_id
@@ -361,19 +584,58 @@ async def handle_invoice_payment_failed(
         tenant = result.scalar_one_or_none()
         
         if not tenant:
-            logger.warning(f"Tenant não encontrado para subscription {subscription_id}")
+            logger.error(
+                f"❌ ERRO: Tenant não encontrado para invoice de pagamento falhado | "
+                f"Invoice: {invoice_id} | "
+                f"Subscription: {subscription_id} | "
+                f"Customer: {customer_id} | "
+                f"Valor: {amount_due/100 if amount_due else 0} {currency.upper()} | "
+                f"Tentativas: {attempt_count}"
+            )
             return
+        
+        old_status = tenant.subscription_status
         
         # Atualizar status para past_due (não desativar imediatamente)
         tenant.subscription_status = 'past_due'
         
-        await db.commit()
-        await db.refresh(tenant)
-        
-        logger.info(f"Tenant {tenant.id} status atualizado para 'past_due' devido a falha no pagamento")
+        try:
+            await db.commit()
+            await db.refresh(tenant)
+            
+            logger.warning(
+                f"⚠️ INVOICE PAYMENT FAILED PROCESSADA | "
+                f"Tenant ID: {tenant.id} | "
+                f"Subscription: {subscription_id} | "
+                f"Invoice: {invoice_id} | "
+                f"Status: past_due (anterior: {old_status}) | "
+                f"Valor devido: {amount_due/100 if amount_due else 0} {currency.upper()} | "
+                f"Tentativas: {attempt_count} | "
+                f"Period End atual: {tenant.current_period_end}"
+            )
+        except Exception as db_error:
+            await db.rollback()
+            logger.error(
+                f"❌ ERRO ao salvar status past_due no banco | "
+                f"Tenant ID: {tenant.id} | "
+                f"Subscription: {subscription_id} | "
+                f"Invoice: {invoice_id} | "
+                f"Erro: {str(db_error)}",
+                exc_info=True
+            )
+            raise
         
     except Exception as e:
         await db.rollback()
-        logger.error(f"Erro ao processar invoice.payment_failed: {str(e)}", exc_info=True)
+        logger.error(
+            f"❌ ERRO CRÍTICO ao processar invoice.payment_failed | "
+            f"Invoice: {invoice_id} | "
+            f"Subscription: {subscription_id if 'subscription_id' in locals() else 'N/A'} | "
+            f"Tenant ID: {tenant.id if 'tenant' in locals() else 'N/A'} | "
+            f"Valor: {amount_due/100 if amount_due else 0} {currency.upper()} | "
+            f"Erro: {str(e)} | "
+            f"Tipo: {type(e).__name__}",
+            exc_info=True
+        )
         raise
 

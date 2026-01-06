@@ -85,12 +85,26 @@ class StripeService:
             raise ValueError("Stripe secret key não configurada")
         
         try:
+            logger.info(
+                f"🔄 Iniciando criação de checkout session | "
+                f"Tenant ID: {tenant_id} | "
+                f"Price ID: {plan_price_id} | "
+                f"Customer ID existente: {customer_id or 'N/A'} | "
+                f"Customer Email: {customer_email or 'N/A'}"
+            )
+            
             # Obter ou criar customer
             stripe_customer_id = self.get_or_create_customer(
                 customer_id=customer_id,
                 email=customer_email,
                 name=customer_name,
                 metadata={'tenant_id': str(tenant_id)}
+            )
+            
+            logger.info(
+                f"✅ Customer obtido/criado | "
+                f"Customer ID: {stripe_customer_id} | "
+                f"Tenant ID: {tenant_id}"
             )
             
             # Criar sessão de checkout para assinatura
@@ -136,7 +150,14 @@ class StripeService:
                 billing_address_collection='auto',
             )
             
-            logger.info(f"Checkout session criada para tenant {tenant_id}: {checkout_session.id}")
+            logger.info(
+                f"✅ CHECKOUT SESSION CRIADA NO STRIPE | "
+                f"Session ID: {checkout_session.id} | "
+                f"Tenant ID: {tenant_id} | "
+                f"Customer ID: {stripe_customer_id} | "
+                f"Subscription ID: {checkout_session.subscription or 'N/A (será criado após pagamento)'} | "
+                f"URL: {checkout_session.url[:50]}..."
+            )
             
             return {
                 'id': checkout_session.id,
@@ -146,7 +167,16 @@ class StripeService:
             }
             
         except stripe.error.StripeError as e:
-            logger.error(f"Erro ao criar checkout session: {str(e)}")
+            logger.error(
+                f"❌ ERRO do Stripe ao criar checkout session | "
+                f"Tenant ID: {tenant_id} | "
+                f"Price ID: {plan_price_id} | "
+                f"Customer ID: {customer_id or 'N/A'} | "
+                f"Erro Stripe: {str(e)} | "
+                f"Tipo: {type(e).__name__} | "
+                f"Código: {getattr(e, 'code', 'N/A')}",
+                exc_info=True
+            )
             raise
     
     def manage_billing_portal(
@@ -298,17 +328,43 @@ class StripeService:
         
         # Se customer_id foi fornecido, tentar recuperar
         if customer_id:
+            logger.info(
+                f"🔍 Tentando recuperar customer existente | "
+                f"Customer ID: {customer_id}"
+            )
             try:
                 customer = stripe.Customer.retrieve(customer_id)
-                logger.info(f"Customer existente recuperado: {customer_id}")
+                logger.info(
+                    f"✅ Customer existente recuperado | "
+                    f"Customer ID: {customer.id} | "
+                    f"Email: {customer.email or 'N/A'} | "
+                    f"Nome: {customer.name or 'N/A'}"
+                )
                 return customer.id
             except stripe.error.StripeError as e:
                 # Se o customer não existe, criar um novo
-                logger.warning(f"Customer {customer_id} não encontrado, criando novo: {str(e)}")
+                logger.warning(
+                    f"⚠️ Customer {customer_id} não encontrado no Stripe, criando novo | "
+                    f"Erro: {str(e)} | "
+                    f"Tipo: {type(e).__name__} | "
+                    f"Email fornecido: {email or 'N/A'}"
+                )
         
         # Criar novo customer
         if not email:
+            logger.error(
+                f"❌ ERRO: Email é obrigatório para criar um novo customer | "
+                f"Customer ID fornecido: {customer_id or 'N/A'} | "
+                f"Name: {name or 'N/A'}"
+            )
             raise ValueError("Email é obrigatório para criar um novo customer")
+        
+        logger.info(
+            f"🆕 Criando novo customer no Stripe | "
+            f"Email: {email} | "
+            f"Nome: {name or 'N/A'} | "
+            f"Metadata: {metadata}"
+        )
         
         try:
             customer_data = {
@@ -322,10 +378,25 @@ class StripeService:
                 customer_data['metadata'] = metadata
             
             customer = stripe.Customer.create(**customer_data)
-            logger.info(f"Novo customer criado: {customer.id}")
+            logger.info(
+                f"✅ NOVO CUSTOMER CRIADO NO STRIPE | "
+                f"Customer ID: {customer.id} | "
+                f"Email: {customer.email} | "
+                f"Nome: {customer.name or 'N/A'} | "
+                f"Metadata: {customer.metadata}"
+            )
             return customer.id
             
         except stripe.error.StripeError as e:
-            logger.error(f"Erro ao criar customer: {str(e)}")
+            logger.error(
+                f"❌ ERRO ao criar customer no Stripe | "
+                f"Email: {email} | "
+                f"Nome: {name or 'N/A'} | "
+                f"Metadata: {metadata} | "
+                f"Erro Stripe: {str(e)} | "
+                f"Tipo: {type(e).__name__} | "
+                f"Código: {getattr(e, 'code', 'N/A')}",
+                exc_info=True
+            )
             raise
 

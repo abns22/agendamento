@@ -212,27 +212,72 @@ async def create_checkout_session(
         success_url = request_data.success_url or f"{frontend_url}/admin/billing/success"
         cancel_url = request_data.cancel_url or f"{frontend_url}/admin/billing/cancel"
         
+        logger.info(
+            f"📋 Configuração do checkout | "
+            f"Tenant ID: {tenant.id} | "
+            f"Stripe Customer ID existente: {tenant.stripe_customer_id or 'N/A'} | "
+            f"Price ID: {settings.STRIPE_PRICE_ID} | "
+            f"Success URL: {success_url} | "
+            f"Cancel URL: {cancel_url}"
+        )
+        
         # Criar instância do StripeService
         stripe_service = StripeService()
         
         # Criar checkout session
         # O StripeService irá criar ou recuperar o customer automaticamente
-        checkout_data = stripe_service.create_checkout_session(
-            tenant_id=UUID(tenant.id),
-            plan_price_id=settings.STRIPE_PRICE_ID,
-            success_url=success_url,
-            cancel_url=cancel_url,
-            customer_id=tenant.stripe_customer_id,  # Passar customer_id se já existir
-            customer_email=current_user.email,
-            customer_name=tenant.name or current_user.email.split('@')[0]  # Usar nome do tenant ou email
-        )
+        try:
+            checkout_data = stripe_service.create_checkout_session(
+                tenant_id=UUID(tenant.id),
+                plan_price_id=settings.STRIPE_PRICE_ID,
+                success_url=success_url,
+                cancel_url=cancel_url,
+                customer_id=tenant.stripe_customer_id,  # Passar customer_id se já existir
+                customer_email=current_user.email,
+                customer_name=tenant.name or current_user.email.split('@')[0]  # Usar nome do tenant ou email
+            )
+            
+            logger.info(
+                f"✅ CHECKOUT SESSION CRIADA COM SUCESSO | "
+                f"Tenant ID: {tenant.id} | "
+                f"Session ID: {checkout_data.get('id', 'N/A')} | "
+                f"Customer ID: {checkout_data.get('customer_id', 'N/A')} | "
+                f"Checkout URL: {checkout_data.get('url', 'N/A')[:50]}..."
+            )
+        except Exception as stripe_error:
+            logger.error(
+                f"❌ ERRO ao criar checkout session no Stripe | "
+                f"Tenant ID: {tenant.id} | "
+                f"User Email: {current_user.email} | "
+                f"Price ID: {settings.STRIPE_PRICE_ID} | "
+                f"Erro: {str(stripe_error)} | "
+                f"Tipo: {type(stripe_error).__name__}",
+                exc_info=True
+            )
+            raise
         
         # Salvar stripe_customer_id no banco se foi criado/recuperado
         if checkout_data.get('customer_id') and checkout_data['customer_id'] != tenant.stripe_customer_id:
+            old_customer_id = tenant.stripe_customer_id
             tenant.stripe_customer_id = checkout_data['customer_id']
-            await db.commit()
-            await db.refresh(tenant)
-            logger.info(f"stripe_customer_id salvo para tenant {tenant.id}: {checkout_data['customer_id']}")
+            try:
+                await db.commit()
+                await db.refresh(tenant)
+                logger.info(
+                    f"💾 stripe_customer_id salvo no banco | "
+                    f"Tenant ID: {tenant.id} | "
+                    f"Customer ID: {checkout_data['customer_id']} (anterior: {old_customer_id or 'N/A'})"
+                )
+            except Exception as db_error:
+                await db.rollback()
+                logger.error(
+                    f"❌ ERRO ao salvar stripe_customer_id no banco | "
+                    f"Tenant ID: {tenant.id} | "
+                    f"Customer ID: {checkout_data['customer_id']} | "
+                    f"Erro: {str(db_error)}",
+                    exc_info=True
+                )
+                # Não falhar a requisição se não conseguir salvar o customer_id
         
         return CreateCheckoutSessionResponse(
             checkout_url=checkout_data['url'],
