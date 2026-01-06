@@ -5,6 +5,7 @@ import { Card, Modal, Button, Input } from '../../components/ui'
 import { api, formatCurrency } from '../../utils/api'
 import ClientQuickRegisterModal from './ClientQuickRegisterModal'
 import BirthdaysSection from './BirthdaysSection'
+import UpcomingAppointmentsWidget from './UpcomingAppointmentsWidget'
 
 /**
  * Página de Dashboard Administrativo.
@@ -104,60 +105,63 @@ const DashboardPage = () => {
         </p>
       </div>
 
-      {/* Cards de Indicadores Financeiros */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Cards de Indicadores Financeiros - Design Minimalista */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {/* Card: Faturamento */}
-        <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 font-medium">Faturamento (mês)</p>
-              <p className="text-2xl font-bold text-green-700 mt-1">
+        <Card className="bg-white border-gray-200 py-3 px-4">
+          <div className="flex items-center gap-3">
+            <div className="text-2xl">💰</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-500 font-medium mb-0.5">Faturamento (mês)</p>
+              <p className="text-lg font-semibold text-gray-800 truncate">
                 {isLoadingSummary ? '...' : formatCurrency(parseFloat(summary.faturamento_total || 0))}
               </p>
             </div>
-            <div className="text-4xl">💰</div>
           </div>
         </Card>
 
         {/* Card: Agendamentos Finalizados */}
-        <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 font-medium">Agendamentos (mês)</p>
-              <p className="text-2xl font-bold text-blue-700 mt-1">
+        <Card className="bg-white border-gray-200 py-3 px-4">
+          <div className="flex items-center gap-3">
+            <div className="text-2xl">📅</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-500 font-medium mb-0.5">Agendamentos (mês)</p>
+              <p className="text-lg font-semibold text-gray-800">
                 {isLoadingSummary ? '...' : summary.total_appointments_finalizados || 0}
               </p>
             </div>
-            <div className="text-4xl">📅</div>
           </div>
         </Card>
 
         {/* Card: Ticket Médio */}
-        <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 font-medium">Ticket Médio</p>
-              <p className="text-2xl font-bold text-purple-700 mt-1">
+        <Card className="bg-white border-gray-200 py-3 px-4">
+          <div className="flex items-center gap-3">
+            <div className="text-2xl">📊</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-500 font-medium mb-0.5">Ticket Médio</p>
+              <p className="text-lg font-semibold text-gray-800 truncate">
                 {isLoadingSummary ? '...' : formatCurrency(parseFloat(summary.ticket_medio || 0))}
               </p>
             </div>
-            <div className="text-4xl">📊</div>
           </div>
         </Card>
 
         {/* Card: Aniversariantes do Mês */}
-        <Card className="bg-gradient-to-br from-pink-50 to-pink-100 border-pink-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600 font-medium">Aniversariantes</p>
-              <p className="text-2xl font-bold text-pink-700 mt-1">
+        <Card className="bg-white border-gray-200 py-3 px-4">
+          <div className="flex items-center gap-3">
+            <div className="text-2xl">🎂</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-500 font-medium mb-0.5">Aniversariantes</p>
+              <p className="text-lg font-semibold text-gray-800">
                 {birthdaysCount}
               </p>
             </div>
-            <div className="text-4xl">🎂</div>
           </div>
         </Card>
       </div>
+
+      {/* Widget de Próximos Agendamentos */}
+      <UpcomingAppointmentsWidget />
 
       {/* Dica de Promoção (quando ticket médio estiver baixo) */}
       {!isLoadingSummary && summary.ticket_medio > 0 && summary.ticket_medio < 100 && mostPopularServiceName && (

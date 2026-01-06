@@ -228,6 +228,22 @@ const AgendaPage = () => {
     fetchAppointments()
   }, [fetchAppointments])
 
+  // Abrir modal de detalhes se appointment_id estiver na URL
+  useEffect(() => {
+    const appointmentId = searchParams.get('appointment_id')
+    if (appointmentId && appointments.length > 0) {
+      const appointment = appointments.find(apt => apt.id === appointmentId)
+      if (appointment) {
+        setSelectedAppointment(appointment)
+        setIsModalOpen(true)
+        // Remover appointment_id da URL após abrir o modal
+        const newParams = new URLSearchParams(searchParams)
+        newParams.delete('appointment_id')
+        setSearchParams(newParams, { replace: true })
+      }
+    }
+  }, [appointments, searchParams, setSearchParams])
+
   // Handlers para botões de atalho
   const handleQuickFilter = (days) => {
     setDaysAhead(days)

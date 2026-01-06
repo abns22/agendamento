@@ -15,6 +15,9 @@ from app.models.appointment import Appointment, AppointmentStatus
 from app.models.service import Service
 from app.models.transaction import Transaction
 from app.models.appointment_service import AppointmentService
+from app.models.client import Client
+from sqlalchemy.orm import selectinload
+from typing import List
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/admin/dashboard", tags=["Admin - Dashboard"])
@@ -307,5 +310,169 @@ async def get_dashboard_summary(
         raise HTTPException(
             status_code=500,
             detail=f"Erro ao calcular resumo financeiro: {str(e)}"
+        )
+
+
+class UpcomingAppointmentItem(BaseModel):
+    """Item de agendamento dentro de um dia."""
+    id: str
+    start_time: str  # Formato HH:MM
+    total_price: Optional[Decimal] = None
+    client_name: Optional[str] = None
+    services: str  # String formatada com nomes dos serviços (ex: "Corte, Barba")
+
+
+class UpcomingAppointmentDay(BaseModel):
+    """Agrupamento de agendamentos por dia."""
+    date: str  # Formato YYYY-MM-DD
+    date_label: str  # Label formatado (ex: "Hoje", "Amanhã", "15 de Janeiro")
+    appointments: List[UpcomingAppointmentItem]
+
+
+class UpcomingAppointmentsResponse(BaseModel):
+    """Resposta do endpoint de próximos agendamentos."""
+    days: List[UpcomingAppointmentDay]
+
+
+@router.get(
+    "/upcoming",
+    response_model=UpcomingAppointmentsResponse,
+    summary="Obter próximos agendamentos",
+    description="Retorna agendamentos futuros agrupados por dia, ordenados por horário. Usa notification_days do tenant para determinar o período."
+)
+async def get_upcoming_appointments(
+    tenant: Tenant = Depends(verify_subscription_access),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retorna agendamentos futuros agrupados por dia.
+    
+    Busca agendamentos onde start_datetime > agora e <= hoje + notification_days.
+    Ordena por start_datetime ASC (mais próximos primeiro).
+    Agrupa por dia na resposta.
+    
+    Args:
+        tenant: Tenant autenticado (contém notification_days)
+        db: Sessão do banco de dados
+        
+    Returns:
+        UpcomingAppointmentsResponse: Agendamentos agrupados por dia
+    """
+    try:
+        tenant_id_str = str(tenant.id) if tenant.id else None
+        if not tenant_id_str:
+            raise HTTPException(status_code=400, detail="tenant_id inválido")
+        
+        # Obter notification_days do tenant (padrão: 3)
+        notification_days = getattr(tenant, 'notification_days', None) or 3
+        
+        # Calcular período: agora até hoje + N dias
+        now = datetime.utcnow()
+        end_date = date.today() + timedelta(days=notification_days)
+        end_datetime = datetime.combine(end_date, datetime.max.time())
+        
+        # Buscar agendamentos futuros (não cancelados, não bloqueios manuais)
+        # JOIN com Client para pegar client_name
+        # JOIN com AppointmentService e Service para pegar nomes dos serviços
+        appointments_query = select(Appointment).where(
+            and_(
+                Appointment.tenant_id == tenant_id_str,
+                Appointment.start_datetime > now,
+                Appointment.start_datetime <= end_datetime,
+                Appointment.status != AppointmentStatus.CANCELED,
+                Appointment.is_manual_block == False
+            )
+        ).options(
+            selectinload(Appointment.client),  # Carregar cliente relacionado
+            selectinload(Appointment.services)  # Carregar serviços relacionados
+        ).order_by(
+            Appointment.start_datetime.asc()  # Ordenar por horário (mais próximo primeiro)
+        )
+        
+        appointments_result = await db.execute(appointments_query)
+        appointments = appointments_result.scalars().all()
+        
+        # Agrupar por dia
+        from collections import defaultdict
+        
+        # Função para formatar label do dia
+        def format_date_label(appointment_date: date) -> str:
+            today = date.today()
+            if appointment_date == today:
+                return "Hoje"
+            elif appointment_date == today + timedelta(days=1):
+                return "Amanhã"
+            else:
+                # Formato: "15 de Janeiro"
+                months_pt = [
+                    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+                    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
+                ]
+                return f"{appointment_date.day} de {months_pt[appointment_date.month - 1]}"
+        
+        # Agrupar agendamentos por dia
+        appointments_by_day = defaultdict(list)
+        
+        for apt in appointments:
+            # Extrair data (sem hora) do start_datetime
+            apt_date = apt.start_datetime.date()
+            date_str = apt_date.isoformat()  # YYYY-MM-DD
+            
+            # Formatar horário (HH:MM)
+            start_time_str = apt.start_datetime.strftime("%H:%M")
+            
+            # Obter nome do cliente (prioridade: client.name > customer_name)
+            client_name = None
+            if apt.client:
+                client_name = apt.client.name
+            elif apt.customer_name:
+                client_name = apt.customer_name
+            
+            # Obter nomes dos serviços
+            service_names = []
+            if apt.services:
+                service_names = [s.name for s in apt.services]
+            
+            # Formatar string de serviços (ex: "Corte, Barba" ou "Combo")
+            services_str = ", ".join(service_names) if service_names else "Sem serviço"
+            
+            # Criar item de agendamento
+            appointment_item = UpcomingAppointmentItem(
+                id=str(apt.id),
+                start_time=start_time_str,
+                total_price=Decimal(str(apt.total_value)) if apt.total_value else None,
+                client_name=client_name,
+                services=services_str
+            )
+            
+            appointments_by_day[date_str].append(appointment_item)
+        
+        # Converter para lista de UpcomingAppointmentDay
+        days_list = []
+        for date_str in sorted(appointments_by_day.keys()):  # Ordenar por data
+            apt_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            date_label = format_date_label(apt_date)
+            
+            # Ordenar agendamentos do dia por horário (já vem ordenado, mas garantir)
+            appointments_for_day = sorted(
+                appointments_by_day[date_str],
+                key=lambda x: x.start_time
+            )
+            
+            day_group = UpcomingAppointmentDay(
+                date=date_str,
+                date_label=date_label,
+                appointments=appointments_for_day
+            )
+            days_list.append(day_group)
+        
+        return UpcomingAppointmentsResponse(days=days_list)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao buscar próximos agendamentos: {str(e)}"
         )
 
