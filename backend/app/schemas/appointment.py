@@ -160,21 +160,27 @@ class AppointmentUpdate(BaseModel):
     status: Optional[str] = Field(None, description="Novo status do agendamento (PENDING, CONFIRMED, CANCELED, COMPLETED)")
     start_datetime: Optional[datetime] = Field(None, description="Nova data e hora de início do agendamento (UTC)")
     service_ids: Optional[List[UUID]] = Field(
-        None,
+        default=None,
         min_length=1,
         description="Nova lista de UUIDs dos serviços (opcional, mantém os atuais se não for enviado)"
     )
     # Compatibilidade retroativa
     service_id: Optional[UUID] = Field(
-        None,
+        default=None,
         description="DEPRECATED: Use service_ids. Novo UUID único do serviço (opcional, para compatibilidade)"
     )
     
     @model_validator(mode='after')
     def normalize_service_ids(self):
         """Normaliza service_ids: se service_id único for fornecido, converte para lista."""
-        if not self.service_ids and self.service_id:
+        # Garantir que service_ids sempre existe (mesmo que seja None)
+        if not hasattr(self, 'service_ids') or self.service_ids is None:
+            self.service_ids = None
+        
+        # Se service_ids não foi fornecido mas service_id foi, converter para lista
+        if (not self.service_ids or len(self.service_ids) == 0) and self.service_id:
             self.service_ids = [self.service_id]
+        
         return self
 
     class Config:

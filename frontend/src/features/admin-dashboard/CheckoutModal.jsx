@@ -49,10 +49,22 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
       if (!isPaid) {
         const totalValue = calculateTotalValueFromServices()
         setValueDue(totalValue.toFixed(2))
+        // Limpar entradas de pagamento quando mudar para conta a receber
+        setPaymentEntries([])
       } else {
         setValueDue('')
+        // Se não há entradas de pagamento e é pagamento à vista, criar uma
+        if (paymentEntries.length === 0) {
+          const totalValue = calculateTotalValueFromServices()
+          setPaymentEntries([{
+            payment_method_id: '',
+            value_paid: totalValue.toFixed(2),
+            installments: 1
+          }])
+        }
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, services, isPaid])
   
   // Preencher dados do cliente automaticamente quando abrir modal ou quando isPaid mudar para false
@@ -157,13 +169,17 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
     console.log('Valor total calculado (múltiplos serviços):', totalValue)
     setGrossValue(totalValue)
     
-    // Inicializar com uma entrada de pagamento vazia
-    if (paymentEntries.length === 0) {
+    // Inicializar com uma entrada de pagamento vazia apenas se for pagamento à vista
+    // Se for conta a receber (isPaid === false), não criar entrada de pagamento
+    if (paymentEntries.length === 0 && isPaid) {
       setPaymentEntries([{
         payment_method_id: '',
         value_paid: totalValue.toFixed(2),
         installments: 1
       }])
+    } else if (!isPaid && paymentEntries.length > 0) {
+      // Se mudou para conta a receber, limpar entradas de pagamento
+      setPaymentEntries([])
     }
   }
   
@@ -458,7 +474,14 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
           )}
         </div>
         
-        {/* Formas de Pagamento */}
+        {/* Formas de Pagamento - Ocultar se for conta a receber total */}
+        {(() => {
+          const finalValueAfterDiscount = calculateFinalValue()
+          const hasValueDue = valueDue && parseFloat(valueDue) > 0
+          const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
+          const isFullAccountsReceivable = !isPaid && hasValueDue && Math.abs(valueDueNum - finalValueAfterDiscount) < 0.01
+          return !isFullAccountsReceivable
+        })() && (
         <div>
           <div className="flex justify-between items-center mb-3">
             <label className="block text-sm font-semibold text-text">
@@ -494,12 +517,26 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">
-                      Forma de Pagamento *
+                      Forma de Pagamento {(() => {
+                        // Não exigir forma de pagamento se for conta a receber total
+                        const finalValueAfterDiscount = calculateFinalValue()
+                        const hasValueDue = valueDue && parseFloat(valueDue) > 0
+                        const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
+                        const isFullAccountsReceivable = !isPaid && hasValueDue && Math.abs(valueDueNum - finalValueAfterDiscount) < 0.01
+                        return isFullAccountsReceivable ? '' : '*'
+                      })()}
                     </label>
                     <select
                       value={entry.payment_method_id}
                       onChange={(e) => updatePaymentEntry(index, 'payment_method_id', e.target.value)}
-                      required
+                      required={(() => {
+                        // Não exigir forma de pagamento se for conta a receber total
+                        const finalValueAfterDiscount = calculateFinalValue()
+                        const hasValueDue = valueDue && parseFloat(valueDue) > 0
+                        const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
+                        const isFullAccountsReceivable = !isPaid && hasValueDue && Math.abs(valueDueNum - finalValueAfterDiscount) < 0.01
+                        return !isFullAccountsReceivable
+                      })()}
                       className="w-full px-3 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                       disabled={isSubmitting}
                     >
@@ -514,7 +551,14 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
                   
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">
-                      Valor (R$) *
+                      Valor (R$) {(() => {
+                        // Não exigir valor se for conta a receber total
+                        const finalValueAfterDiscount = calculateFinalValue()
+                        const hasValueDue = valueDue && parseFloat(valueDue) > 0
+                        const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
+                        const isFullAccountsReceivable = !isPaid && hasValueDue && Math.abs(valueDueNum - finalValueAfterDiscount) < 0.01
+                        return isFullAccountsReceivable ? '' : '*'
+                      })()}
                     </label>
                     <input
                       type="number"
@@ -522,7 +566,14 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
                       step="0.01"
                       value={entry.value_paid}
                       onChange={(e) => updatePaymentEntry(index, 'value_paid', e.target.value)}
-                      required
+                      required={(() => {
+                        // Não exigir valor se for conta a receber total
+                        const finalValueAfterDiscount = calculateFinalValue()
+                        const hasValueDue = valueDue && parseFloat(valueDue) > 0
+                        const valueDueNum = hasValueDue ? parseFloat(valueDue) : 0
+                        const isFullAccountsReceivable = !isPaid && hasValueDue && Math.abs(valueDueNum - finalValueAfterDiscount) < 0.01
+                        return !isFullAccountsReceivable
+                      })()}
                       className="w-full px-3 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                       disabled={isSubmitting}
                     />
@@ -575,6 +626,7 @@ const CheckoutModal = ({ isOpen, onClose, appointment, service, onSuccess }) => 
             )}
           </div>
         </div>
+        )}
         
         {/* Custo Adicional */}
         <div>

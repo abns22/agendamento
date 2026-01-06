@@ -502,7 +502,10 @@ async def update_appointment(
         )
     
     # Determinar quais serviços usar (novos ou atuais)
-    service_ids_to_use = update_data.service_ids if update_data.service_ids else None
+    # Acessar service_ids de forma segura (Pydantic sempre cria atributos definidos, mas pode ser None)
+    service_ids_to_use = None
+    if hasattr(update_data, 'service_ids') and update_data.service_ids:
+        service_ids_to_use = update_data.service_ids
     
     # Se não foram fornecidos novos service_ids, buscar os atuais
     if not service_ids_to_use:
@@ -525,7 +528,16 @@ async def update_appointment(
         new_start_datetime = new_start_datetime.replace(tzinfo=None)
     
     # VALIDAÇÃO DE CONFLITOS: Se horário ou serviços foram alterados
-    if update_data.start_datetime or update_data.service_ids:
+    # Verificar se service_ids foi fornecido (não None e não vazio)
+    has_service_ids = False
+    try:
+        has_service_ids = (hasattr(update_data, 'service_ids') and 
+                          update_data.service_ids is not None and 
+                          len(update_data.service_ids) > 0)
+    except (AttributeError, TypeError):
+        has_service_ids = False
+    
+    if update_data.start_datetime or has_service_ids:
         # 1. Calcular soma das durações dos serviços
         total_duration_minutes = 0
         services_to_use = []
