@@ -536,16 +536,25 @@ async def get_upcoming_appointments(
             # Extrair data (sem hora) do start_datetime
             # IMPORTANTE: Converter para timezone do Brasil antes de extrair a data
             # O start_datetime está em UTC no banco (timezone-naive), então precisamos converter
-            apt_datetime_utc = apt.start_datetime
             
-            # Garantir que o datetime seja tratado como UTC (timezone-naive)
-            # Se já tiver timezone, remover e tratar como UTC
-            if apt_datetime_utc.tzinfo is not None:
-                # Se já tiver timezone, converter para UTC primeiro (removendo timezone)
-                apt_datetime_utc = apt_datetime_utc.replace(tzinfo=None)
+            # O datetime que vem do SQLAlchemy/MySQL é timezone-naive e está em UTC
+            apt_datetime_utc_naive = apt.start_datetime
             
-            # Agora garantir que seja tratado como UTC (timezone-aware)
-            apt_datetime_utc_aware = apt_datetime_utc.replace(tzinfo=ZoneInfo('UTC'))
+            # IMPORTANTE: O MySQL pode retornar o datetime já convertido para o timezone local do servidor
+            # Se o servidor estiver em America/Sao_Paulo, o datetime já estaria no timezone do Brasil
+            # Mas como assumimos que está em UTC, vamos forçar a interpretação como UTC
+            
+            # Garantir que seja tratado como UTC (timezone-aware)
+            # Se já tiver timezone, remover primeiro
+            if apt_datetime_utc_naive.tzinfo is not None:
+                # Se já tiver timezone, remover e tratar como UTC
+                apt_datetime_utc_naive = apt_datetime_utc_naive.replace(tzinfo=None)
+            
+            # Agora criar um datetime timezone-aware em UTC
+            # IMPORTANTE: Assumir que o datetime do banco está sempre em UTC
+            # Se o MySQL retornar em outro timezone, isso pode causar problemas
+            # Mas vamos assumir UTC e converter para o timezone do Brasil
+            apt_datetime_utc_aware = apt_datetime_utc_naive.replace(tzinfo=ZoneInfo('UTC'))
             
             # Converter para timezone do Brasil
             apt_datetime_brazil = apt_datetime_utc_aware.astimezone(brazil_tz)
@@ -555,7 +564,14 @@ async def get_upcoming_appointments(
             date_str = apt_date.isoformat()  # YYYY-MM-DD
             
             # Formatar horário no timezone do Brasil também
+            # Usar strftime com timezone correto
             start_time_str = apt_datetime_brazil.strftime("%H:%M")
+            
+            # DEBUG: Log para verificar a conversão (remover depois)
+            print(f"🔍 UPCOMING DEBUG | apt.start_datetime (raw): {apt.start_datetime} | "
+                  f"apt_datetime_utc_aware: {apt_datetime_utc_aware} | "
+                  f"apt_datetime_brazil: {apt_datetime_brazil} | "
+                  f"start_time_str: {start_time_str}")
             
             # Obter nome do cliente (prioridade: client.name > customer_name)
             client_name = None
