@@ -12,6 +12,7 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta, date
 from decimal import Decimal
 import uuid
+import asyncio
 
 from app.core.database import get_db
 from app.core.dependencies import verify_subscription_access
@@ -657,11 +658,23 @@ async def update_appointment(
         f"update_start_datetime: {update_start_datetime} | "
         f"new_start_datetime: {new_start_datetime} | "
         f"has_service_ids: {has_service_ids} | "
+        f"service_ids_provided: {service_ids_provided} | "
         f"service_ids_to_use: {service_ids_to_use} | "
-        f"original_start: {appointment.start_datetime}"
+        f"original_start: {appointment.start_datetime} | "
+        f"original_services_count: {len(appointment.services) if appointment.services else 0}"
+    )
+    
+    # DEBUG: Verificar se vai entrar no bloco de atualização
+    logger.info(
+        f"🔍 VERIFICANDO ATUALIZAÇÃO | "
+        f"ID: {appointment_id_str} | "
+        f"has_start_datetime: {has_start_datetime} | "
+        f"has_service_ids: {has_service_ids} | "
+        f"will_update: {has_start_datetime or has_service_ids}"
     )
     
     if has_start_datetime or has_service_ids:
+        logger.info(f"✅ ENTRANDO NO BLOCO DE ATUALIZAÇÃO | ID: {appointment_id_str}")
         # 1. Calcular soma das durações dos serviços
         total_duration_minutes = 0
         services_to_use = []
@@ -806,7 +819,12 @@ async def update_appointment(
     
     # IMPORTANTE: Após commit, fazer uma nova query para buscar o appointment atualizado
     # Usar expire_all() para limpar o cache da sessão antes de fazer a nova query
+    # E também fazer expire do objeto appointment específico
     db.expire_all()
+    db.expire(appointment)
+    
+    # Aguardar um pequeno delay para garantir que o commit foi processado (especialmente em ambientes distribuídos)
+    await asyncio.sleep(0.1)  # 100ms de delay
     
     appointment_query = select(Appointment).options(
         selectinload(Appointment.services),
