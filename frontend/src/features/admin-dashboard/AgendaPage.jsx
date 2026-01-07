@@ -298,16 +298,6 @@ const AgendaPage = () => {
     setSearchQuery(value)
   }
 
-  // Função helper para formatar data sem problemas de timezone
-  const formatDateForAPI = (date) => {
-    if (!date) return null
-    // Usar getFullYear, getMonth, getDate para evitar problemas de timezone
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
-  }
-
   const handleStartDateChange = (date) => {
     setStartDate(date)
     setDaysAhead(null) // Limpar days_ahead quando usar data customizada

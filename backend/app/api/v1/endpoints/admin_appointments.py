@@ -363,26 +363,25 @@ async def list_appointments(
             if start_date:
                 try:
                     # Parse da data (YYYY-MM-DD)
+                    # A data vem do frontend representando o dia no timezone do Brasil
+                    # Como os agendamentos são armazenados em UTC no banco, precisamos converter corretamente
+                    # 
+                    # Exemplo: Se o usuário seleciona 07/01, queremos agendamentos que acontecem no dia 07/01 no Brasil
+                    # - Um agendamento às 10:00 do dia 07/01 no Brasil está armazenado como 13:00 UTC do dia 07/01
+                    # - Um agendamento às 02:00 do dia 07/01 no Brasil está armazenado como 05:00 UTC do dia 07/01
+                    # 
+                    # Para capturar todos os agendamentos do dia 07/01 no Brasil:
+                    # - start_datetime >= 07/01 03:00:00 UTC (que é 07/01 00:00:00 BRT)
+                    # - start_datetime <= 08/01 02:59:59 UTC (que é 07/01 23:59:59 BRT)
+                    
                     parsed_date = datetime.strptime(start_date, '%Y-%m-%d')
                     
-                    # Criar datetime no timezone do Brasil às 00:00:00
-                    try:
-                        from zoneinfo import ZoneInfo
-                        brazil_tz = ZoneInfo('America/Sao_Paulo')
-                    except ImportError:
-                        from datetime import timezone as dt_timezone
-                        brazil_tz = dt_timezone(timedelta(hours=-3))
-                    
-                    # Criar datetime local no Brasil (00:00:00 do dia selecionado)
-                    start_dt_brazil = datetime(
+                    # Criar datetime UTC para início do dia no Brasil
+                    # 00:00:00 BRT = 03:00:00 UTC do mesmo dia
+                    start_dt_utc = datetime(
                         parsed_date.year, parsed_date.month, parsed_date.day,
-                        hour=0, minute=0, second=0, microsecond=0,
-                        tzinfo=brazil_tz
+                        hour=3, minute=0, second=0, microsecond=0
                     )
-                    
-                    # Converter para UTC (mantendo o mesmo momento no tempo)
-                    # Exemplo: 07/01 00:00:00 BRT (UTC-3) = 07/01 03:00:00 UTC
-                    start_dt_utc = start_dt_brazil.astimezone(timezone.utc).replace(tzinfo=None)
                     
                     conditions.append(Appointment.start_datetime >= start_dt_utc)
                 except ValueError:
@@ -396,24 +395,13 @@ async def list_appointments(
                     # Parse da data (YYYY-MM-DD)
                     parsed_date = datetime.strptime(end_date, '%Y-%m-%d')
                     
-                    # Criar datetime no timezone do Brasil às 23:59:59.999999
-                    try:
-                        from zoneinfo import ZoneInfo
-                        brazil_tz = ZoneInfo('America/Sao_Paulo')
-                    except ImportError:
-                        from datetime import timezone as dt_timezone
-                        brazil_tz = dt_timezone(timedelta(hours=-3))
-                    
-                    # Criar datetime local no Brasil (23:59:59.999999 do dia selecionado)
-                    # Exemplo: 07/01 23:59:59 BRT (UTC-3) = 08/01 02:59:59 UTC
-                    end_dt_brazil = datetime(
+                    # Criar datetime UTC para fim do dia no Brasil
+                    # 23:59:59 BRT = 02:59:59 UTC do dia seguinte
+                    # Então vamos usar 02:59:59 UTC do dia seguinte
+                    end_dt_utc = datetime(
                         parsed_date.year, parsed_date.month, parsed_date.day,
-                        hour=23, minute=59, second=59, microsecond=999999,
-                        tzinfo=brazil_tz
-                    )
-                    
-                    # Converter para UTC (mantendo o mesmo momento no tempo)
-                    end_dt_utc = end_dt_brazil.astimezone(timezone.utc).replace(tzinfo=None)
+                        hour=2, minute=59, second=59, microsecond=999999
+                    ) + timedelta(days=1)  # Adicionar 1 dia para pegar até 23:59:59 BRT
                     
                     conditions.append(Appointment.start_datetime <= end_dt_utc)
                 except ValueError:
@@ -727,6 +715,9 @@ async def update_appointment(
         for old_appointment_service in old_appointment_services:
             await db.delete(old_appointment_service)
         
+        # IMPORTANTE: Fazer flush antes de adicionar novos serviços para garantir que as deleções sejam processadas
+        await db.flush()
+        
         # Adicionar novos serviços
         for service in services_to_use:
             new_appointment_service = AppointmentServiceModel(
@@ -753,29 +744,27 @@ async def update_appointment(
     await db.flush()
     await db.commit()
     
-    # IMPORTANTE: Fazer refresh explícito do appointment para garantir que os dados atualizados sejam carregados
-    # Primeiro, fazer refresh sem relacionamentos
-    await db.refresh(appointment)
-    
-    # Depois, recarregar relacionamentos explicitamente
-    await db.refresh(appointment, ['services', 'client'])
-    
-    # Se os serviços foram atualizados, garantir que estão carregados
-    if has_service_ids:
-        # Forçar recarregamento dos serviços
-        from sqlalchemy.orm import selectinload
-        appointment_query = select(Appointment).options(
-            selectinload(Appointment.services),
-            selectinload(Appointment.client)
-        ).where(
-            Appointment.id == appointment_id_str
+    # IMPORTANTE: Após commit, fazer uma nova query para buscar o appointment atualizado
+    # Isso garante que temos os dados mais recentes do banco, incluindo relacionamentos
+    appointment_query = select(Appointment).options(
+        selectinload(Appointment.services),
+        selectinload(Appointment.client)
+    ).where(
+        and_(
+            Appointment.id == appointment_id_str,
+            Appointment.tenant_id == tenant_id_str
         )
-        refreshed_result = await db.execute(appointment_query)
-        refreshed_appointment = refreshed_result.scalar_one_or_none()
-        if refreshed_appointment:
-            appointment = refreshed_appointment
+    )
+    refreshed_result = await db.execute(appointment_query)
+    refreshed_appointment = refreshed_result.scalar_one_or_none()
     
-    return await build_appointment_response(appointment, db)
+    if not refreshed_appointment:
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao recarregar agendamento após atualização"
+        )
+    
+    return await build_appointment_response(refreshed_appointment, db)
 
 
 @router.post(

@@ -382,11 +382,28 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
         try {
           const response = await api.put(`/api/v1/admin/appointments/${appointment.id}`, payload)
           console.log('✅ Agendamento atualizado com sucesso:', response.data)
+          console.log('📋 Dados retornados:', {
+            id: response.data.id,
+            start_datetime: response.data.start_datetime,
+            service_ids: response.data.service_ids,
+            services: response.data.service_names
+          })
           
-          // Chamar onSuccess ANTES de fechar o modal para garantir que a lista seja atualizada
-          if (onSuccess) {
-            await onSuccess() // Aguardar a atualização da lista
-          }
+          // Fechar modal primeiro
+          onClose()
+          
+          // Chamar onSuccess DEPOIS de fechar para garantir que a lista seja atualizada
+          // Usar setTimeout para garantir que o modal feche antes de atualizar
+          setTimeout(async () => {
+            if (onSuccess) {
+              try {
+                await onSuccess() // Aguardar a atualização da lista
+                console.log('🔄 Lista de agendamentos atualizada')
+              } catch (err) {
+                console.error('❌ Erro ao atualizar lista:', err)
+              }
+            }
+          }, 100)
           
           // Feedback visual de sucesso
           try {
@@ -396,8 +413,6 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
           } catch {
             // Ignorar falhas em alert
           }
-          
-          onClose()
         } catch (err) {
           console.error('❌ Erro ao atualizar agendamento:', err)
           console.error('Detalhes do erro:', {
