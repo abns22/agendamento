@@ -85,6 +85,50 @@ const AgendaPage = () => {
     }
   }, [])
 
+  // Função para obter data atual no timezone do Brasil (America/Sao_Paulo)
+  const getBrazilianDate = useCallback(() => {
+    const now = new Date()
+    // Obter a data atual no timezone do Brasil
+    const brazilDateStr = now.toLocaleString('pt-BR', { 
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    })
+    // Criar uma nova data a partir da string formatada (sem timezone)
+    const [day, month, year] = brazilDateStr.split('/')
+    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
+  }, [])
+
+  // Função helper para formatar data sem problemas de timezone
+  const formatDateForAPI = useCallback((date) => {
+    if (!date) return null
+    // Usar getFullYear, getMonth, getDate para evitar problemas de timezone
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }, [])
+
+  // Função para atualizar URL com os filtros
+  const updateURLParams = useCallback((updates) => {
+    const newParams = new URLSearchParams(searchParams)
+
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === '' || value === undefined) {
+        newParams.delete(key)
+      } else {
+        if (value instanceof Date) {
+          newParams.set(key, formatDateForAPI(value))
+        } else {
+          newParams.set(key, value.toString())
+        }
+      }
+    })
+    
+    setSearchParams(newParams, { replace: true })
+  }, [searchParams, setSearchParams, formatDateForAPI])
+
   // Sincronizar estados locais com URL quando ela mudar (ex: botão voltar/avançar)
   // IMPORTANTE: Se não houver filtros na URL, definir filtro padrão para mostrar apenas agendamentos futuros
   useEffect(() => {
@@ -140,35 +184,6 @@ const AgendaPage = () => {
     end_datetime: '',
     description: ''
   })
-
-  // Função helper para formatar data sem problemas de timezone
-  const formatDateForAPI = useCallback((date) => {
-    if (!date) return null
-    // Usar getFullYear, getMonth, getDate para evitar problemas de timezone
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
-  }, [])
-
-  // Função para atualizar URL com os filtros
-  const updateURLParams = useCallback((updates) => {
-    const newParams = new URLSearchParams(searchParams)
-
-    Object.entries(updates).forEach(([key, value]) => {
-      if (value === null || value === '' || value === undefined) {
-        newParams.delete(key)
-      } else {
-        if (value instanceof Date) {
-          newParams.set(key, formatDateForAPI(value))
-        } else {
-          newParams.set(key, value.toString())
-        }
-      }
-    })
-    
-    setSearchParams(newParams, { replace: true })
-  }, [searchParams, setSearchParams, formatDateForAPI])
 
   const fetchServices = async () => {
     try {
