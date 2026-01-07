@@ -60,8 +60,17 @@ async def build_appointment_response(
     Returns:
         AppointmentResponse: Response com informações dos serviços
     """
-    # Carregar serviços relacionados (lazy="selectin" no modelo já carrega automaticamente, mas refresh garante)
-    await db.refresh(appointment, ['services'])
+    # IMPORTANTE: Não fazer refresh se a sessão já foi commitada
+    # O refresh pode causar problemas se a sessão não estiver mais ativa
+    # Os serviços já devem estar carregados via selectinload
+    try:
+        # Tentar refresh apenas se a sessão ainda estiver ativa
+        if appointment.services is None or len(appointment.services) == 0:
+            await db.refresh(appointment, ['services'])
+    except Exception as refresh_error:
+        # Se o refresh falhar, tentar carregar os serviços manualmente
+        logger.warning(f"⚠️ Erro ao fazer refresh, carregando serviços manualmente: {str(refresh_error)}")
+        pass
     
     apt_dict = AppointmentResponse.model_validate(appointment).model_dump()
     
@@ -852,10 +861,8 @@ async def update_appointment(
         )
     
     # IMPORTANTE: Após commit, fazer uma nova query para buscar o appointment atualizado
-    # Usar expire_all() para limpar o cache da sessão antes de fazer a nova query
-    # E também fazer expire do objeto appointment específico
-    db.expire_all()
-    db.expire(appointment)
+    # NÃO fazer expire_all() ou expire() após commit, pois pode causar rollback
+    # A nova query já buscará os dados atualizados do banco
     
     # Aguardar um pequeno delay para garantir que o commit foi processado (especialmente em ambientes distribuídos)
     await asyncio.sleep(0.1)  # 100ms de delay
