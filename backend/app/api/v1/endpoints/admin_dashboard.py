@@ -367,9 +367,33 @@ async def get_upcoming_appointments(
         notification_days = getattr(tenant, 'notification_days', None) or 3
         
         # Calcular período: agora até hoje + N dias
-        now = datetime.utcnow()
-        end_date = date.today() + timedelta(days=notification_days)
-        end_datetime = datetime.combine(end_date, datetime.max.time())
+        # IMPORTANTE: Usar timezone do Brasil (America/Sao_Paulo) para calcular "hoje"
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            # Fallback para Python < 3.9
+            from backports.zoneinfo import ZoneInfo
+        
+        brazil_tz = ZoneInfo('America/Sao_Paulo')
+        
+        # Obter data/hora atual no timezone do Brasil
+        now_brazil = datetime.now(brazil_tz)
+        
+        # Obter apenas a data (sem horário) no timezone do Brasil
+        today_brazil = now_brazil.date()
+        
+        # Calcular data final (hoje + N dias) no timezone do Brasil
+        end_date_brazil = today_brazil + timedelta(days=notification_days)
+        
+        # Converter para UTC para consultar no banco de dados
+        # Agora no Brasil em UTC (timezone-naive)
+        now_utc = now_brazil.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+        
+        # Data final no Brasil convertida para UTC
+        # Fim do dia (23:59:59.999999) no timezone do Brasil
+        end_datetime_brazil = datetime.combine(end_date_brazil, datetime.max.time().replace(microsecond=999999))
+        end_datetime_brazil = end_datetime_brazil.replace(tzinfo=brazil_tz)
+        end_datetime = end_datetime_brazil.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
         
         # Buscar agendamentos futuros (não cancelados, não bloqueios manuais)
         # JOIN com Client para pegar client_name
@@ -377,7 +401,7 @@ async def get_upcoming_appointments(
         appointments_query = select(Appointment).where(
             and_(
                 Appointment.tenant_id == tenant_id_str,
-                Appointment.start_datetime > now,
+                Appointment.start_datetime > now_utc,
                 Appointment.start_datetime <= end_datetime,
                 Appointment.status != AppointmentStatus.CANCELED,
                 Appointment.is_manual_block == False
@@ -397,10 +421,10 @@ async def get_upcoming_appointments(
         
         # Função para formatar label do dia
         def format_date_label(appointment_date: date) -> str:
-            today = date.today()
-            if appointment_date == today:
+            # Usar a data de hoje no Brasil que já foi calculada
+            if appointment_date == today_brazil:
                 return "Hoje"
-            elif appointment_date == today + timedelta(days=1):
+            elif appointment_date == today_brazil + timedelta(days=1):
                 return "Amanhã"
             else:
                 # Formato: "15 de Janeiro"
@@ -415,11 +439,26 @@ async def get_upcoming_appointments(
         
         for apt in appointments:
             # Extrair data (sem hora) do start_datetime
-            apt_date = apt.start_datetime.date()
+            # IMPORTANTE: Converter para timezone do Brasil antes de extrair a data
+            # O start_datetime está em UTC no banco (timezone-naive), então precisamos converter
+            apt_datetime_utc = apt.start_datetime
+            # Assumir que o datetime no banco está em UTC (timezone-naive)
+            # Converter para timezone-aware UTC primeiro
+            if apt_datetime_utc.tzinfo is None:
+                apt_datetime_utc_aware = apt_datetime_utc.replace(tzinfo=ZoneInfo('UTC'))
+            else:
+                apt_datetime_utc_aware = apt_datetime_utc
+            
+            # Converter para timezone do Brasil
+            apt_datetime_brazil = apt_datetime_utc_aware.astimezone(brazil_tz)
+            
+            # Extrair apenas a data no timezone do Brasil
+            apt_date = apt_datetime_brazil.date()
             date_str = apt_date.isoformat()  # YYYY-MM-DD
             
-            # Formatar horário (HH:MM)
-            start_time_str = apt.start_datetime.strftime("%H:%M")
+            # Formatar horário no timezone do Brasil também
+            start_time_str = apt_datetime_brazil.strftime("%H:%M")
+            
             
             # Obter nome do cliente (prioridade: client.name > customer_name)
             client_name = None

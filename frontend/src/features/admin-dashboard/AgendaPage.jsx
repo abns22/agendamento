@@ -46,12 +46,28 @@ const AgendaPage = () => {
   const [showAppointmentsSummary, setShowAppointmentsSummary] = useState(true)
   
   // Filtros - inicializar com valores padrão (serão sincronizados com URL via useEffect)
+  // IMPORTANTE: Por padrão, mostrar apenas agendamentos futuros (do dia atual em diante)
   const [searchQuery, setSearchQuery] = useState('')
   const [startDate, setStartDate] = useState(null)
   const [endDate, setEndDate] = useState(null)
   const [daysAhead, setDaysAhead] = useState(null)
   const [statusFilter, setStatusFilter] = useState('')
   const [serviceFilter, setServiceFilter] = useState('')
+  
+  // Função para obter data atual no Brasil (reutilizar da já existente)
+  const getBrazilianDate = useCallback(() => {
+    const now = new Date()
+    // Obter a data atual no timezone do Brasil
+    const brazilDateStr = now.toLocaleString('pt-BR', { 
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    })
+    // Criar uma nova data a partir da string formatada (sem timezone)
+    const [day, month, year] = brazilDateStr.split('/')
+    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
+  }, [])
   
   // Ref para debounce
   const searchDebounceRef = useRef(null)
@@ -70,6 +86,7 @@ const AgendaPage = () => {
   }, [])
 
   // Sincronizar estados locais com URL quando ela mudar (ex: botão voltar/avançar)
+  // IMPORTANTE: Se não houver filtros na URL, definir filtro padrão para mostrar apenas agendamentos futuros
   useEffect(() => {
     const search = searchParams.get('search') || ''
     const startDateParam = searchParams.get('start_date')
@@ -77,6 +94,9 @@ const AgendaPage = () => {
     const daysAheadParam = searchParams.get('days_ahead')
     const status = searchParams.get('status') || ''
     const serviceId = searchParams.get('service_id') || ''
+    
+    // Verificar se já há filtros na URL
+    const hasFilters = startDateParam || endDateParam || daysAheadParam
     
     setSearchQuery(search)
     
@@ -98,12 +118,21 @@ const AgendaPage = () => {
       const daysAheadNum = parseInt(daysAheadParam)
       setDaysAhead(isNaN(daysAheadNum) ? null : daysAheadNum)
     } else {
-      setDaysAhead(null)
+      // Se não há filtros na URL, definir filtro padrão: mostrar apenas futuros (do dia atual em diante)
+      if (!hasFilters) {
+        const today = getBrazilianDate()
+        const todayStr = formatDateForAPI(today)
+        // Definir start_date como hoje na URL para mostrar apenas agendamentos futuros
+        updateURLParams({ start_date: todayStr })
+        setDaysAhead(null)
+      } else {
+        setDaysAhead(null)
+      }
     }
     
     setStatusFilter(status)
     setServiceFilter(serviceId)
-  }, [searchParams])
+  }, [searchParams, getBrazilianDate, formatDateForAPI, updateURLParams])
 
   // Formulário de bloqueio
   const [blockForm, setBlockForm] = useState({
@@ -856,7 +885,7 @@ const AgendaPage = () => {
           {appointments.map((apt) => (
             <Card
               key={apt.id}
-              className="cursor-pointer hover:shadow-lg transition-all duration-200"
+              className="p-3 sm:p-4 cursor-pointer hover:shadow-lg transition-all duration-200"
               onClick={() => handleAppointmentClick(apt)}
               style={{
                 borderLeft: apt.service_display_color_code 
@@ -870,17 +899,17 @@ const AgendaPage = () => {
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   {/* Data e Horário em Destaque */}
-                  <div className="mb-3">
+                  <div className="mb-2">
                     {/* Data */}
-                    <div className="mb-2">
-                      <span className="text-sm font-semibold text-gray-600">
+                    <div className="mb-1">
+                      <span className="text-xs font-medium text-gray-600">
                         {format(new Date(apt.start_datetime), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
                       </span>
                     </div>
                     {/* Horário */}
                     <div className="flex items-baseline gap-2">
                       <span 
-                        className="text-3xl sm:text-4xl font-bold"
+                        className="text-2xl sm:text-3xl font-bold"
                         style={{
                           color: apt.service_display_color_code || '#004B6B'
                         }}
@@ -906,8 +935,8 @@ const AgendaPage = () => {
                   {/* Tipo: Bloqueio ou Agendamento */}
                   {apt.is_manual_block ? (
                     <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-base font-bold text-gray-800">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-bold text-gray-800">
                           🔒 Bloqueio Manual
                         </span>
                         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(apt.status)}`}>
@@ -920,14 +949,14 @@ const AgendaPage = () => {
                     </div>
                   ) : (
                     <div>
-                      <h3 className="text-xl font-bold text-text mb-2">
+                      <h3 className="text-lg font-bold text-text mb-1.5">
                         {apt.customer_name || 'Cliente não informado'}
                       </h3>
-                      <div className="space-y-2 text-sm">
+                      <div className="space-y-1.5 text-xs sm:text-sm">
                         {/* Exibir serviços - usar service_names se disponível, senão usar service_name (compatibilidade) */}
                         {(apt.service_names && apt.service_names.length > 0) ? (
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-lg">⚙️</span>
+                            <span className="text-base">⚙️</span>
                             <div className="flex flex-wrap gap-1">
                               {apt.service_names.map((name, idx) => (
                                 <span key={idx} className="font-semibold text-gray-700">
@@ -938,13 +967,13 @@ const AgendaPage = () => {
                           </div>
                         ) : apt.service_name && (
                           <div className="flex items-center gap-2">
-                            <span className="text-lg">⚙️</span>
+                            <span className="text-base">⚙️</span>
                             <span className="font-semibold text-gray-700">{apt.service_name}</span>
                           </div>
                         )}
                         {apt.customer_phone && (
                           <div className="flex items-center gap-2">
-                            <span className="text-lg">📞</span>
+                            <span className="text-base">📞</span>
                             <span className="text-gray-600">{apt.customer_phone}</span>
                           </div>
                         )}
