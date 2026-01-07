@@ -571,8 +571,8 @@ async def get_appointment(
     description="Atualiza um agendamento existente (status, horário, serviços). Valida conflitos de horário ao editar."
 )
 async def update_appointment(
-    appointment_id: UUID = Path(..., description="UUID do agendamento"),
     request: Request,
+    appointment_id: UUID = Path(..., description="UUID do agendamento"),
     update_data: AppointmentUpdate = ...,
     tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
