@@ -56,6 +56,19 @@ const AgendaPage = () => {
   // Ref para debounce
   const searchDebounceRef = useRef(null)
 
+  // Função helper para criar Date a partir de string YYYY-MM-DD sem problemas de timezone
+  const parseDateFromString = useCallback((dateStr) => {
+    if (!dateStr) return null
+    try {
+      // Parse da string YYYY-MM-DD diretamente, sem usar new Date() que pode ter problemas de timezone
+      const [year, month, day] = dateStr.split('-').map(Number)
+      // Criar Date usando componentes locais (sem timezone)
+      return new Date(year, month - 1, day)
+    } catch (e) {
+      return null
+    }
+  }, [])
+
   // Sincronizar estados locais com URL quando ela mudar (ex: botão voltar/avançar)
   useEffect(() => {
     const search = searchParams.get('search') || ''
@@ -68,21 +81,15 @@ const AgendaPage = () => {
     setSearchQuery(search)
     
     if (startDateParam) {
-      try {
-        setStartDate(new Date(startDateParam))
-      } catch (e) {
-        setStartDate(null)
-      }
+      const parsedDate = parseDateFromString(startDateParam)
+      setStartDate(parsedDate)
     } else {
       setStartDate(null)
     }
     
     if (endDateParam) {
-      try {
-        setEndDate(new Date(endDateParam))
-      } catch (e) {
-        setEndDate(null)
-      }
+      const parsedDate = parseDateFromString(endDateParam)
+      setEndDate(parsedDate)
     } else {
       setEndDate(null)
     }

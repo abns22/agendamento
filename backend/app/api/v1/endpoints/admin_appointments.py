@@ -22,6 +22,9 @@ from app.models.service import Service
 from app.models.client import Client
 from app.models.payment_entry import PaymentEntry
 from app.models.schedule_config import ScheduleConfig
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.schemas.appointment import (
     AppointmentResponse,
@@ -363,21 +366,20 @@ async def list_appointments(
             if start_date:
                 try:
                     # Parse da data (YYYY-MM-DD)
-                    # A data vem do frontend representando o dia no timezone do Brasil
-                    # Como os agendamentos são armazenados em UTC no banco, precisamos converter corretamente
+                    # Quando o usuário seleciona dia 12, queremos agendamentos que acontecem no dia 12 no Brasil
                     # 
-                    # Exemplo: Se o usuário seleciona 07/01, queremos agendamentos que acontecem no dia 07/01 no Brasil
-                    # - Um agendamento às 10:00 do dia 07/01 no Brasil está armazenado como 13:00 UTC do dia 07/01
-                    # - Um agendamento às 02:00 do dia 07/01 no Brasil está armazenado como 05:00 UTC do dia 07/01
+                    # Exemplo: Dia 12/01 no Brasil
+                    # - 00:00:00 BRT do dia 12 = 03:00:00 UTC do dia 12
+                    # - 23:59:59 BRT do dia 12 = 02:59:59 UTC do dia 13
                     # 
-                    # Para capturar todos os agendamentos do dia 07/01 no Brasil:
-                    # - start_datetime >= 07/01 03:00:00 UTC (que é 07/01 00:00:00 BRT)
-                    # - start_datetime <= 08/01 02:59:59 UTC (que é 07/01 23:59:59 BRT)
+                    # Para capturar todos os agendamentos do dia 12 no Brasil:
+                    # - start_datetime >= 03:00:00 UTC do dia 12 (início do dia 12 no Brasil)
+                    # - start_datetime < 03:00:00 UTC do dia 13 (início do dia 13 no Brasil)
                     
                     parsed_date = datetime.strptime(start_date, '%Y-%m-%d')
                     
                     # Criar datetime UTC para início do dia no Brasil
-                    # 00:00:00 BRT = 03:00:00 UTC do mesmo dia
+                    # 00:00:00 BRT = 03:00:00 UTC (considerando UTC-3)
                     start_dt_utc = datetime(
                         parsed_date.year, parsed_date.month, parsed_date.day,
                         hour=3, minute=0, second=0, microsecond=0
@@ -395,15 +397,16 @@ async def list_appointments(
                     # Parse da data (YYYY-MM-DD)
                     parsed_date = datetime.strptime(end_date, '%Y-%m-%d')
                     
-                    # Criar datetime UTC para fim do dia no Brasil
-                    # 23:59:59 BRT = 02:59:59 UTC do dia seguinte
-                    # Então vamos usar 02:59:59 UTC do dia seguinte
+                    # Criar datetime UTC para início do dia seguinte no Brasil
+                    # Isso garante que capturamos até 23:59:59 BRT do dia selecionado
+                    # 00:00:00 BRT do dia seguinte = 03:00:00 UTC do dia seguinte
                     end_dt_utc = datetime(
                         parsed_date.year, parsed_date.month, parsed_date.day,
-                        hour=2, minute=59, second=59, microsecond=999999
-                    ) + timedelta(days=1)  # Adicionar 1 dia para pegar até 23:59:59 BRT
+                        hour=3, minute=0, second=0, microsecond=0
+                    ) + timedelta(days=1)  # Próximo dia às 03:00:00 UTC
                     
-                    conditions.append(Appointment.start_datetime <= end_dt_utc)
+                    # Usar < para não incluir o início do próximo dia
+                    conditions.append(Appointment.start_datetime < end_dt_utc)
                 except ValueError:
                     raise HTTPException(
                         status_code=400,
@@ -605,13 +608,23 @@ async def update_appointment(
         )
     
     # Determinar quais serviços usar (novos ou atuais)
-    # Acessar service_ids de forma segura (Pydantic sempre cria atributos definidos, mas pode ser None)
-    service_ids_to_use = None
-    if hasattr(update_data, 'service_ids') and update_data.service_ids:
-        service_ids_to_use = update_data.service_ids
+    # IMPORTANTE: Verificar se service_ids foi fornecido ANTES de determinar service_ids_to_use
+    has_service_ids = False
+    service_ids_provided = None
     
-    # Se não foram fornecidos novos service_ids, buscar os atuais
-    if not service_ids_to_use:
+    try:
+        if hasattr(update_data, 'service_ids') and update_data.service_ids is not None:
+            if isinstance(update_data.service_ids, list) and len(update_data.service_ids) > 0:
+                has_service_ids = True
+                service_ids_provided = update_data.service_ids
+    except (AttributeError, TypeError):
+        has_service_ids = False
+    
+    # Determinar service_ids_to_use: usar os fornecidos ou buscar os atuais
+    if has_service_ids and service_ids_provided:
+        service_ids_to_use = service_ids_provided
+    else:
+        # Buscar serviços atuais do agendamento
         await db.refresh(appointment, ['services'])
         if appointment.services:
             service_ids_to_use = [UUID(str(s.id)) for s in appointment.services]
@@ -624,26 +637,29 @@ async def update_appointment(
             )
     
     # Determinar qual horário usar (novo ou atual)
-    # Usar getattr para acessar start_datetime de forma segura
-    update_start_datetime = getattr(update_data, 'start_datetime', None)
-    new_start_datetime = update_start_datetime if update_start_datetime else appointment.start_datetime
+    # IMPORTANTE: Acessar start_datetime diretamente do objeto Pydantic
+    update_start_datetime = None
+    if hasattr(update_data, 'start_datetime'):
+        update_start_datetime = update_data.start_datetime
+    
+    has_start_datetime = update_start_datetime is not None
+    new_start_datetime = update_start_datetime if has_start_datetime else appointment.start_datetime
     
     # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
-    if new_start_datetime.tzinfo is not None:
+    if new_start_datetime and hasattr(new_start_datetime, 'tzinfo') and new_start_datetime.tzinfo is not None:
         new_start_datetime = new_start_datetime.replace(tzinfo=None)
     
-    # VALIDAÇÃO DE CONFLITOS: Se horário ou serviços foram alterados
-    # Verificar se service_ids foi fornecido (não None e não vazio)
-    has_service_ids = False
-    try:
-        has_service_ids = (hasattr(update_data, 'service_ids') and 
-                          update_data.service_ids is not None and 
-                          len(update_data.service_ids) > 0)
-    except (AttributeError, TypeError):
-        has_service_ids = False
-    
-    # Verificar se start_datetime foi fornecido
-    has_start_datetime = update_start_datetime is not None
+    # DEBUG: Log para verificar o que está sendo recebido
+    logger.info(
+        f"🔄 UPDATE APPOINTMENT DEBUG | "
+        f"ID: {appointment_id_str} | "
+        f"has_start_datetime: {has_start_datetime} | "
+        f"update_start_datetime: {update_start_datetime} | "
+        f"new_start_datetime: {new_start_datetime} | "
+        f"has_service_ids: {has_service_ids} | "
+        f"service_ids_to_use: {service_ids_to_use} | "
+        f"original_start: {appointment.start_datetime}"
+    )
     
     if has_start_datetime or has_service_ids:
         # 1. Calcular soma das durações dos serviços
@@ -700,9 +716,20 @@ async def update_appointment(
             )
         
         # 5. Se não houver conflito, atualizar dados
+        # IMPORTANTE: Atualizar os campos diretamente no objeto
         appointment.start_datetime = new_start_datetime
         appointment.end_datetime = new_end_datetime
         appointment.total_value = total_value
+        
+        # DEBUG: Log para verificar o que está sendo atualizado
+        logger.info(
+            f"💾 UPDATING APPOINTMENT | "
+            f"ID: {appointment_id_str} | "
+            f"start_datetime: {appointment.start_datetime} | "
+            f"end_datetime: {appointment.end_datetime} | "
+            f"total_value: {appointment.total_value} | "
+            f"services_count: {len(services_to_use)}"
+        )
         
         # Atualizar relacionamento com serviços
         # Primeiro, buscar e remover todos os AppointmentService antigos
@@ -740,12 +767,47 @@ async def update_appointment(
                 detail=f"Status inválido. Use: PENDING, CONFIRMED, CANCELED, COMPLETED"
             )
     
-    # Fazer flush para garantir que todas as mudanças sejam enviadas ao banco
-    await db.flush()
-    await db.commit()
+    # IMPORTANTE: Fazer flush e commit para garantir que todas as mudanças sejam persistidas
+    try:
+        await db.flush()
+        
+        # DEBUG: Verificar estado antes do commit
+        logger.info(
+            f"💾 BEFORE COMMIT | "
+            f"ID: {appointment_id_str} | "
+            f"start_datetime: {appointment.start_datetime} | "
+            f"end_datetime: {appointment.end_datetime} | "
+            f"total_value: {appointment.total_value} | "
+            f"service_id: {appointment.service_id}"
+        )
+        
+        await db.commit()
+        
+        # DEBUG: Verificar estado após commit
+        logger.info(
+            f"✅ AFTER COMMIT | "
+            f"ID: {appointment_id_str} | "
+            f"start_datetime: {appointment.start_datetime} | "
+            f"end_datetime: {appointment.end_datetime}"
+        )
+        
+    except Exception as commit_error:
+        await db.rollback()
+        logger.error(
+            f"❌ ERRO NO COMMIT | "
+            f"ID: {appointment_id_str} | "
+            f"Erro: {str(commit_error)}",
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao salvar alterações: {str(commit_error)}"
+        )
     
     # IMPORTANTE: Após commit, fazer uma nova query para buscar o appointment atualizado
-    # Isso garante que temos os dados mais recentes do banco, incluindo relacionamentos
+    # Usar expire_all() para limpar o cache da sessão antes de fazer a nova query
+    db.expire_all()
+    
     appointment_query = select(Appointment).options(
         selectinload(Appointment.services),
         selectinload(Appointment.client)
@@ -759,10 +821,21 @@ async def update_appointment(
     refreshed_appointment = refreshed_result.scalar_one_or_none()
     
     if not refreshed_appointment:
+        logger.error(f"❌ Agendamento não encontrado após atualização: {appointment_id_str}")
         raise HTTPException(
             status_code=500,
             detail="Erro ao recarregar agendamento após atualização"
         )
+    
+    # DEBUG: Verificar dados retornados da query
+    logger.info(
+        f"📋 REFRESHED APPOINTMENT | "
+        f"ID: {refreshed_appointment.id} | "
+        f"start_datetime: {refreshed_appointment.start_datetime} | "
+        f"end_datetime: {refreshed_appointment.end_datetime} | "
+        f"services_count: {len(refreshed_appointment.services) if refreshed_appointment.services else 0} | "
+        f"service_ids: {[str(s.id) for s in refreshed_appointment.services] if refreshed_appointment.services else []}"
+    )
     
     return await build_appointment_response(refreshed_appointment, db)
 
