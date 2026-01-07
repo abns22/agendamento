@@ -16,6 +16,7 @@ from app.models.service import Service
 from app.models.transaction import Transaction
 from app.models.appointment_service import AppointmentService
 from app.models.client import Client
+from app.models.debtor import Debtor, DebtorStatus
 from sqlalchemy.orm import selectinload
 from typing import List
 from pydantic import BaseModel
@@ -180,25 +181,12 @@ async def get_dashboard_summary(
         period_end_dt = datetime.combine(period_end, datetime.max.time())
         
         # 1. FATURAMENTO TOTAL: Soma de net_value de transactions onde appointment.status = COMPLETED
-        # Join Transaction -> Appointment para filtrar por status COMPLETED
-        faturamento_query = select(func.coalesce(func.sum(Transaction.net_value), 0)).select_from(
-            Transaction.__table__.join(
-                Appointment.__table__,
-                Transaction.appointment_id == Appointment.id
-            )
-        ).where(
-            and_(
-                Transaction.tenant_id == tenant_id_str,
-                Transaction.date_time >= period_start_dt,
-                Transaction.date_time <= period_end_dt,
-                Appointment.status == AppointmentStatus.COMPLETED
-            )
-        )
-        faturamento_result = await db.execute(faturamento_query)
-        faturamento_total = faturamento_result.scalar() or Decimal('0.00')
+        # IMPORTANTE: Considerar apenas valores realmente recebidos:
+        # - Transações com is_paid=True (pagas à vista)
+        # - Contas a receber (is_paid=False) que foram pagas no período (Debtor.paid_at no período)
         
-        # 2. TOTAL DE DESCONTOS: Soma de discount de transactions no período (com appointments COMPLETED)
-        descontos_query = select(func.coalesce(func.sum(Transaction.discount), 0)).select_from(
+        # 1.1. Transações pagas à vista no período
+        faturamento_paid_query = select(func.coalesce(func.sum(Transaction.net_value), 0)).select_from(
             Transaction.__table__.join(
                 Appointment.__table__,
                 Transaction.appointment_id == Appointment.id
@@ -208,11 +196,76 @@ async def get_dashboard_summary(
                 Transaction.tenant_id == tenant_id_str,
                 Transaction.date_time >= period_start_dt,
                 Transaction.date_time <= period_end_dt,
+                Transaction.is_paid == True,  # Apenas pagas
                 Appointment.status == AppointmentStatus.COMPLETED
             )
         )
-        descontos_result = await db.execute(descontos_query)
-        total_descontos = descontos_result.scalar() or Decimal('0.00')
+        faturamento_paid_result = await db.execute(faturamento_paid_query)
+        faturamento_paid = faturamento_paid_result.scalar() or Decimal('0.00')
+        
+        # 1.2. Contas a receber que foram pagas no período (usando Debtor.paid_at)
+        debtors_paid_query = select(Debtor).join(
+            Transaction,
+            Debtor.transaction_id == Transaction.id
+        ).join(
+            Appointment,
+            Transaction.appointment_id == Appointment.id
+        ).where(
+            and_(
+                Transaction.tenant_id == tenant_id_str,
+                Debtor.status == DebtorStatus.PAID,
+                Debtor.paid_at >= period_start_dt,
+                Debtor.paid_at <= period_end_dt,
+                Appointment.status == AppointmentStatus.COMPLETED
+            )
+        )
+        debtors_paid_result = await db.execute(debtors_paid_query)
+        debtors_paid = debtors_paid_result.scalars().all()
+        
+        # Somar valores das contas a receber pagas no período
+        faturamento_receivables = Decimal('0.00')
+        for debtor in debtors_paid:
+            faturamento_receivables += Decimal(str(debtor.value_due))
+        
+        # Faturamento total = pagas à vista + contas a receber pagas no período
+        faturamento_total = faturamento_paid + faturamento_receivables
+        
+        # 2. TOTAL DE DESCONTOS: Soma de discount de transactions realmente recebidas no período
+        # Considerar apenas transações pagas à vista (is_paid=True) e contas a receber pagas no período
+        
+        # 2.1. Descontos de transações pagas à vista
+        descontos_paid_query = select(func.coalesce(func.sum(Transaction.discount), 0)).select_from(
+            Transaction.__table__.join(
+                Appointment.__table__,
+                Transaction.appointment_id == Appointment.id
+            )
+        ).where(
+            and_(
+                Transaction.tenant_id == tenant_id_str,
+                Transaction.date_time >= period_start_dt,
+                Transaction.date_time <= period_end_dt,
+                Transaction.is_paid == True,  # Apenas pagas
+                Appointment.status == AppointmentStatus.COMPLETED
+            )
+        )
+        descontos_paid_result = await db.execute(descontos_paid_query)
+        descontos_paid = descontos_paid_result.scalar() or Decimal('0.00')
+        
+        # 2.2. Descontos de contas a receber pagas no período
+        # O desconto já está na Transaction, então precisamos buscar as transactions dos debtors pagos
+        debtor_transaction_ids = [str(d.transaction_id) for d in debtors_paid]
+        descontos_receivables = Decimal('0.00')
+        if debtor_transaction_ids:
+            descontos_receivables_query = select(func.coalesce(func.sum(Transaction.discount), 0)).where(
+                and_(
+                    Transaction.tenant_id == tenant_id_str,
+                    Transaction.id.in_(debtor_transaction_ids)
+                )
+            )
+            descontos_receivables_result = await db.execute(descontos_receivables_query)
+            descontos_receivables = descontos_receivables_result.scalar() or Decimal('0.00')
+        
+        total_descontos = descontos_paid + descontos_receivables
         
         # 3. TOTAL DE AGENDAMENTOS DO MÊS: Contar TODOS os appointments do período (exceto CANCELED)
         # Baseado na data do agendamento (start_datetime)
@@ -231,13 +284,18 @@ async def get_dashboard_summary(
         appointments_mes_result = await db.execute(appointments_mes_query)
         total_appointments_finalizados = appointments_mes_result.scalar() or 0
         
-        # 4. CONTAR AGENDAMENTOS COM TRANSACTION (para ticket médio)
-        # O ticket médio deve considerar apenas agendamentos que têm transaction (já que faturamento só considera esses)
-        appointments_com_transaction_query = select(func.count(func.distinct(Transaction.appointment_id))).where(
+        # 4. CONTAR AGENDAMENTOS COM TRANSACTION REALMENTE RECEBIDOS (para ticket médio)
+        # Considerar apenas:
+        # - Transações pagas à vista (is_paid=True) no período
+        # - Contas a receber pagas no período (Debtor.paid_at no período)
+        
+        # 4.1. Agendamentos com transações pagas à vista no período
+        appointments_paid_query = select(func.count(func.distinct(Transaction.appointment_id))).where(
             and_(
                 Transaction.tenant_id == tenant_id_str,
                 Transaction.date_time >= period_start_dt,
                 Transaction.date_time <= period_end_dt,
+                Transaction.is_paid == True,  # Apenas pagas
                 Transaction.appointment_id.in_(
                     select(Appointment.id).where(
                         and_(
@@ -248,8 +306,23 @@ async def get_dashboard_summary(
                 )
             )
         )
-        appointments_com_transaction_result = await db.execute(appointments_com_transaction_query)
-        total_appointments_com_transaction = appointments_com_transaction_result.scalar() or 0
+        appointments_paid_result = await db.execute(appointments_paid_query)
+        total_appointments_paid = appointments_paid_result.scalar() or 0
+        
+        # 4.2. Agendamentos com contas a receber pagas no período
+        # Usar os debtors já buscados anteriormente
+        debtor_appointment_ids = set()
+        for debtor in debtors_paid:
+            # Buscar appointment_id da transaction
+            transaction_query = select(Transaction.appointment_id).where(
+                Transaction.id == debtor.transaction_id
+            )
+            transaction_result = await db.execute(transaction_query)
+            appointment_id = transaction_result.scalar_one_or_none()
+            if appointment_id:
+                debtor_appointment_ids.add(appointment_id)
+        
+        total_appointments_com_transaction = total_appointments_paid + len(debtor_appointment_ids)
         
         # 5. TICKET MÉDIO: Faturamento Total / Número de agendamentos com transaction
         ticket_medio = Decimal('0.00')
@@ -257,42 +330,64 @@ async def get_dashboard_summary(
             ticket_medio = faturamento_total / Decimal(str(total_appointments_com_transaction))
         
         # 6. SERVIÇO MAIS PROCURADO: Contar ocorrências em appointment_services
-        # Filtrando por appointments COMPLETED que têm transaction no período
-        # Subquery para obter appointment_ids que têm transaction no período
-        appointment_ids_subquery = select(Transaction.appointment_id).where(
+        # Filtrando por appointments COMPLETED que têm transaction realmente recebida no período
+        # Considerar apenas:
+        # - Transações pagas à vista (is_paid=True) no período
+        # - Contas a receber pagas no período (Debtor.paid_at no período)
+        
+        # 6.1. Appointment IDs de transações pagas à vista no período
+        appointment_ids_paid_list = []
+        appointments_paid_for_service_query = select(Transaction.appointment_id).where(
             and_(
                 Transaction.tenant_id == tenant_id_str,
                 Transaction.date_time >= period_start_dt,
-                Transaction.date_time <= period_end_dt
+                Transaction.date_time <= period_end_dt,
+                Transaction.is_paid == True,  # Apenas pagas
+                Transaction.appointment_id.in_(
+                    select(Appointment.id).where(
+                        and_(
+                            Appointment.tenant_id == tenant_id_str,
+                            Appointment.status == AppointmentStatus.COMPLETED
+                        )
+                    )
+                )
             )
         )
+        appointments_paid_for_service_result = await db.execute(appointments_paid_for_service_query)
+        appointment_ids_paid_list = [apt_id for apt_id in appointments_paid_for_service_result.scalars().all()]
+        
+        # 6.2. Appointment IDs de contas a receber pagas no período (já temos em debtor_appointment_ids)
+        # Combinar ambas as listas
+        all_appointment_ids_received = set(appointment_ids_paid_list) | debtor_appointment_ids
         
         # Query para contar serviços mais procurados
-        # Join AppointmentService -> Appointment
-        count_alias = func.count(AppointmentService.service_id).label('count')
-        servico_mais_procurado_query = select(
-            AppointmentService.service_id,
-            count_alias
-        ).select_from(
-            AppointmentService
-        ).join(
-            Appointment,
-            AppointmentService.appointment_id == Appointment.id
-        ).where(
-            and_(
-                Appointment.tenant_id == tenant_id_str,
-                Appointment.status == AppointmentStatus.COMPLETED,
-                AppointmentService.appointment_id.in_(appointment_ids_subquery)
-            )
-        ).group_by(
-            AppointmentService.service_id
-        ).order_by(
-            desc(count_alias)
-        ).limit(1)
-        
-        servico_mais_procurado_result = await db.execute(servico_mais_procurado_query)
-        servico_mais_procurado_row = servico_mais_procurado_result.first()
-        servico_mais_procurado_id = str(servico_mais_procurado_row.service_id) if servico_mais_procurado_row else None
+        # Se não houver agendamentos recebidos, retornar None
+        servico_mais_procurado_id = None
+        if all_appointment_ids_received:
+            count_alias = func.count(AppointmentService.service_id).label('count')
+            servico_mais_procurado_query = select(
+                AppointmentService.service_id,
+                count_alias
+            ).select_from(
+                AppointmentService
+            ).join(
+                Appointment,
+                AppointmentService.appointment_id == Appointment.id
+            ).where(
+                and_(
+                    Appointment.tenant_id == tenant_id_str,
+                    Appointment.status == AppointmentStatus.COMPLETED,
+                    AppointmentService.appointment_id.in_(list(all_appointment_ids_received))
+                )
+            ).group_by(
+                AppointmentService.service_id
+            ).order_by(
+                desc(count_alias)
+            ).limit(1)
+            
+            servico_mais_procurado_result = await db.execute(servico_mais_procurado_query)
+            servico_mais_procurado_row = servico_mais_procurado_result.first()
+            servico_mais_procurado_id = str(servico_mais_procurado_row.service_id) if servico_mais_procurado_row else None
         
         return DashboardSummaryResponse(
             faturamento_total=faturamento_total,
@@ -442,12 +537,15 @@ async def get_upcoming_appointments(
             # IMPORTANTE: Converter para timezone do Brasil antes de extrair a data
             # O start_datetime está em UTC no banco (timezone-naive), então precisamos converter
             apt_datetime_utc = apt.start_datetime
-            # Assumir que o datetime no banco está em UTC (timezone-naive)
-            # Converter para timezone-aware UTC primeiro
-            if apt_datetime_utc.tzinfo is None:
-                apt_datetime_utc_aware = apt_datetime_utc.replace(tzinfo=ZoneInfo('UTC'))
-            else:
-                apt_datetime_utc_aware = apt_datetime_utc
+            
+            # Garantir que o datetime seja tratado como UTC (timezone-naive)
+            # Se já tiver timezone, remover e tratar como UTC
+            if apt_datetime_utc.tzinfo is not None:
+                # Se já tiver timezone, converter para UTC primeiro (removendo timezone)
+                apt_datetime_utc = apt_datetime_utc.replace(tzinfo=None)
+            
+            # Agora garantir que seja tratado como UTC (timezone-aware)
+            apt_datetime_utc_aware = apt_datetime_utc.replace(tzinfo=ZoneInfo('UTC'))
             
             # Converter para timezone do Brasil
             apt_datetime_brazil = apt_datetime_utc_aware.astimezone(brazil_tz)
@@ -458,7 +556,6 @@ async def get_upcoming_appointments(
             
             # Formatar horário no timezone do Brasil também
             start_time_str = apt_datetime_brazil.strftime("%H:%M")
-            
             
             # Obter nome do cliente (prioridade: client.name > customer_name)
             client_name = None
