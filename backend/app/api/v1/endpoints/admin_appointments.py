@@ -578,6 +578,17 @@ async def update_appointment(
     tenant_id_str = str(tenant.id) if tenant.id else None
     appointment_id_str = str(appointment_id) if appointment_id else None
     
+    # DEBUG: Log do que foi recebido no update_data
+    logger.info(
+        f"📥 RECEBENDO UPDATE REQUEST | "
+        f"ID: {appointment_id_str} | "
+        f"update_data type: {type(update_data)} | "
+        f"update_data dict: {update_data.model_dump() if hasattr(update_data, 'model_dump') else 'N/A'} | "
+        f"start_datetime raw: {getattr(update_data, 'start_datetime', 'NOT_FOUND')} | "
+        f"start_datetime type: {type(getattr(update_data, 'start_datetime', None))} | "
+        f"service_ids raw: {getattr(update_data, 'service_ids', 'NOT_FOUND')}"
+    )
+    
     # Buscar agendamento existente
     result = await db.execute(
         select(Appointment).where(
@@ -639,9 +650,18 @@ async def update_appointment(
     
     # Determinar qual horário usar (novo ou atual)
     # IMPORTANTE: Acessar start_datetime diretamente do objeto Pydantic
-    update_start_datetime = None
-    if hasattr(update_data, 'start_datetime'):
-        update_start_datetime = update_data.start_datetime
+    # O Pydantic sempre cria o atributo, mesmo que seja None
+    update_start_datetime = getattr(update_data, 'start_datetime', None)
+    
+    # DEBUG: Verificar o que foi recebido
+    logger.info(
+        f"🔍 VERIFICANDO start_datetime | "
+        f"ID: {appointment_id_str} | "
+        f"update_start_datetime type: {type(update_start_datetime)} | "
+        f"update_start_datetime value: {update_start_datetime} | "
+        f"is None: {update_start_datetime is None} | "
+        f"hasattr check: {hasattr(update_data, 'start_datetime')}"
+    )
     
     has_start_datetime = update_start_datetime is not None
     new_start_datetime = update_start_datetime if has_start_datetime else appointment.start_datetime
@@ -801,7 +821,21 @@ async def update_appointment(
             f"✅ AFTER COMMIT | "
             f"ID: {appointment_id_str} | "
             f"start_datetime: {appointment.start_datetime} | "
-            f"end_datetime: {appointment.end_datetime}"
+            f"end_datetime: {appointment.end_datetime} | "
+            f"commit successful: True"
+        )
+        
+        # IMPORTANTE: Verificar se o commit foi realmente persistido
+        # Fazendo uma query simples para garantir que a transação foi commitada
+        test_query = select(func.count(Appointment.id)).where(
+            Appointment.id == appointment_id_str
+        )
+        test_result = await db.execute(test_query)
+        test_count = test_result.scalar()
+        logger.info(
+            f"🔍 VERIFICAÇÃO PÓS-COMMIT | "
+            f"ID: {appointment_id_str} | "
+            f"appointment_exists: {test_count > 0}"
         )
         
     except Exception as commit_error:

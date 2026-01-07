@@ -65,11 +65,20 @@ async def get_db() -> AsyncSession:
     """
     Dependency para obter uma sessão do banco de dados.
     Usado em rotas FastAPI via Depends(get_db).
+    
+    IMPORTANTE: Não faz rollback automático. O código da rota deve fazer commit ou rollback explicitamente.
     """
     async with AsyncSessionLocal() as session:
         try:
             yield session
+            # Se chegou aqui sem exceção, a transação foi commitada ou não foi iniciada
+            # Não fazer rollback automático para não reverter commits já feitos
+        except Exception:
+            # Se houve exceção, fazer rollback
+            await session.rollback()
+            raise
         finally:
+            # Fechar a sessão, mas não fazer rollback (pode reverter commits já feitos)
             await session.close()
 
 
