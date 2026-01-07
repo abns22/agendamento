@@ -588,14 +588,20 @@ async def update_appointment(
     appointment_id_str = str(appointment_id) if appointment_id else None
     
     # DEBUG: Log do que foi recebido no update_data
+    # Usar print() também para garantir que apareça nos logs
+    update_data_dict = update_data.model_dump() if hasattr(update_data, 'model_dump') else 'N/A'
+    start_datetime_raw = getattr(update_data, 'start_datetime', 'NOT_FOUND')
+    service_ids_raw = getattr(update_data, 'service_ids', 'NOT_FOUND')
+    
+    print(f"📥 RECEBENDO UPDATE REQUEST | ID: {appointment_id_str} | update_data: {update_data_dict} | start_datetime: {start_datetime_raw} | service_ids: {service_ids_raw}")
     logger.info(
         f"📥 RECEBENDO UPDATE REQUEST | "
         f"ID: {appointment_id_str} | "
         f"update_data type: {type(update_data)} | "
-        f"update_data dict: {update_data.model_dump() if hasattr(update_data, 'model_dump') else 'N/A'} | "
-        f"start_datetime raw: {getattr(update_data, 'start_datetime', 'NOT_FOUND')} | "
+        f"update_data dict: {update_data_dict} | "
+        f"start_datetime raw: {start_datetime_raw} | "
         f"start_datetime type: {type(getattr(update_data, 'start_datetime', None))} | "
-        f"service_ids raw: {getattr(update_data, 'service_ids', 'NOT_FOUND')}"
+        f"service_ids raw: {service_ids_raw}"
     )
     
     # Buscar agendamento existente
@@ -628,18 +634,27 @@ async def update_appointment(
             detail="Não é possível editar um agendamento finalizado"
         )
     
+    # IMPORTANTE: Obter dados via model_dump() primeiro, que é mais confiável
+    # O Pydantic pode ter validado e convertido os dados, então model_dump() mostra o estado final
+    data_dict = update_data.model_dump()
+    print(f"📋 model_dump completo: {data_dict}")
+    
     # Determinar quais serviços usar (novos ou atuais)
-    # IMPORTANTE: Verificar se service_ids foi fornecido ANTES de determinar service_ids_to_use
     has_service_ids = False
     service_ids_provided = None
     
-    try:
-        if hasattr(update_data, 'service_ids') and update_data.service_ids is not None:
-            if isinstance(update_data.service_ids, list) and len(update_data.service_ids) > 0:
-                has_service_ids = True
-                service_ids_provided = update_data.service_ids
-    except (AttributeError, TypeError):
-        has_service_ids = False
+    # Verificar service_ids no dict
+    if 'service_ids' in data_dict and data_dict['service_ids'] is not None:
+        service_ids_list = data_dict['service_ids']
+        if isinstance(service_ids_list, list) and len(service_ids_list) > 0:
+            has_service_ids = True
+            # Converter strings para UUIDs se necessário
+            try:
+                service_ids_provided = [UUID(str(sid)) if not isinstance(sid, UUID) else sid for sid in service_ids_list]
+                print(f"✅ service_ids detectado: {service_ids_provided}")
+            except (ValueError, TypeError) as e:
+                print(f"❌ Erro ao converter service_ids para UUIDs: {str(e)}")
+                has_service_ids = False
     
     # Determinar service_ids_to_use: usar os fornecidos ou buscar os atuais
     if has_service_ids and service_ids_provided:
@@ -658,11 +673,37 @@ async def update_appointment(
             )
     
     # Determinar qual horário usar (novo ou atual)
-    # IMPORTANTE: Acessar start_datetime diretamente do objeto Pydantic
-    # O Pydantic sempre cria o atributo, mesmo que seja None
-    update_start_datetime = getattr(update_data, 'start_datetime', None)
+    # IMPORTANTE: Usar model_dump() que já foi obtido acima
+    update_start_datetime = None
+    
+    if 'start_datetime' in data_dict and data_dict['start_datetime'] is not None:
+        start_dt_value = data_dict['start_datetime']
+        print(f"🔍 start_datetime no dict: {start_dt_value} | type: {type(start_dt_value)}")
+        
+        # Se já é datetime, usar diretamente
+        if isinstance(start_dt_value, datetime):
+            update_start_datetime = start_dt_value
+            print(f"✅ start_datetime já é datetime: {update_start_datetime}")
+        # Se é string, fazer parse
+        elif isinstance(start_dt_value, str):
+            try:
+                # Formato ISO: 2026-01-17T11:00:00.000Z ou 2026-01-17T11:00:00+00:00
+                if start_dt_value.endswith('Z'):
+                    # Remover Z e adicionar +00:00 para fromisoformat
+                    date_str = start_dt_value.replace('Z', '+00:00')
+                else:
+                    date_str = start_dt_value
+                update_start_datetime = datetime.fromisoformat(date_str)
+                print(f"✅ start_datetime parseado de string: {update_start_datetime}")
+            except Exception as parse_error:
+                print(f"❌ Erro ao fazer parse de start_datetime '{start_dt_value}': {str(parse_error)}")
+        else:
+            print(f"⚠️ start_datetime tem tipo inesperado: {type(start_dt_value)}")
+    else:
+        print(f"⚠️ start_datetime não encontrado no dict ou é None")
     
     # DEBUG: Verificar o que foi recebido
+    print(f"🔍 VERIFICANDO start_datetime | ID: {appointment_id_str} | type: {type(update_start_datetime)} | value: {update_start_datetime} | is None: {update_start_datetime is None}")
     logger.info(
         f"🔍 VERIFICANDO start_datetime | "
         f"ID: {appointment_id_str} | "
@@ -680,6 +721,7 @@ async def update_appointment(
         new_start_datetime = new_start_datetime.replace(tzinfo=None)
     
     # DEBUG: Log para verificar o que está sendo recebido
+    print(f"🔄 UPDATE APPOINTMENT DEBUG | ID: {appointment_id_str} | has_start_datetime: {has_start_datetime} | has_service_ids: {has_service_ids} | will_update: {has_start_datetime or has_service_ids}")
     logger.info(
         f"🔄 UPDATE APPOINTMENT DEBUG | "
         f"ID: {appointment_id_str} | "
@@ -694,15 +736,18 @@ async def update_appointment(
     )
     
     # DEBUG: Verificar se vai entrar no bloco de atualização
+    will_update = has_start_datetime or has_service_ids
+    print(f"🔍 VERIFICANDO ATUALIZAÇÃO | ID: {appointment_id_str} | has_start_datetime: {has_start_datetime} | has_service_ids: {has_service_ids} | will_update: {will_update}")
     logger.info(
         f"🔍 VERIFICANDO ATUALIZAÇÃO | "
         f"ID: {appointment_id_str} | "
         f"has_start_datetime: {has_start_datetime} | "
         f"has_service_ids: {has_service_ids} | "
-        f"will_update: {has_start_datetime or has_service_ids}"
+        f"will_update: {will_update}"
     )
     
     if has_start_datetime or has_service_ids:
+        print(f"✅ ENTRANDO NO BLOCO DE ATUALIZAÇÃO | ID: {appointment_id_str}")
         logger.info(f"✅ ENTRANDO NO BLOCO DE ATUALIZAÇÃO | ID: {appointment_id_str}")
         # 1. Calcular soma das durações dos serviços
         total_duration_minutes = 0
