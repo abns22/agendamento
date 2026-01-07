@@ -85,21 +85,6 @@ const AgendaPage = () => {
     }
   }, [])
 
-  // Função para obter data atual no timezone do Brasil (America/Sao_Paulo)
-  const getBrazilianDate = useCallback(() => {
-    const now = new Date()
-    // Obter a data atual no timezone do Brasil
-    const brazilDateStr = now.toLocaleString('pt-BR', { 
-      timeZone: 'America/Sao_Paulo',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    })
-    // Criar uma nova data a partir da string formatada (sem timezone)
-    const [day, month, year] = brazilDateStr.split('/')
-    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
-  }, [])
-
   // Função helper para formatar data sem problemas de timezone
   const formatDateForAPI = useCallback((date) => {
     if (!date) return null
