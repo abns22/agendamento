@@ -3,7 +3,7 @@ Endpoints administrativos para gerenciamento de Agendamentos.
 
 Permite que administradores visualizem e gerenciem agendamentos de clientes.
 """
-from fastapi import APIRouter, HTTPException, Depends, Path, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, Path, Query, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
@@ -357,10 +357,31 @@ async def list_appointments(
     # LÓGICA DE PRIORIDADE: days_ahead sobrescreve start_date/end_date
     if days_ahead:
         # Calcular período automaticamente: hoje até hoje + X dias
-        now = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_dt = now
-        end_dt = now + timedelta(days=days_ahead)
-        end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+        # IMPORTANTE: Usar timezone do Brasil (America/Sao_Paulo) para calcular "hoje"
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            # Fallback para Python < 3.9
+            from backports.zoneinfo import ZoneInfo
+        
+        brazil_tz = ZoneInfo('America/Sao_Paulo')
+        
+        # Obter a data/hora atual no timezone do Brasil
+        now_brazil = datetime.now(brazil_tz)
+        
+        # Obter apenas a data (sem horário) no timezone do Brasil
+        today_brazil = now_brazil.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Converter para UTC para consultar no banco de dados
+        # O datetime no timezone do Brasil é timezone-aware, então convertemos para UTC
+        start_dt = today_brazil.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+        
+        # Calcular data final (hoje + days_ahead) no timezone do Brasil
+        end_date_brazil = today_brazil + timedelta(days=days_ahead)
+        end_date_brazil = end_date_brazil.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        # Converter para UTC
+        end_dt = end_date_brazil.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
         
         query = query.where(
             and_(
@@ -551,6 +572,7 @@ async def get_appointment(
 )
 async def update_appointment(
     appointment_id: UUID = Path(..., description="UUID do agendamento"),
+    request: Request,
     update_data: AppointmentUpdate = ...,
     tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
@@ -587,13 +609,22 @@ async def update_appointment(
     tenant_id_str = str(tenant.id) if tenant.id else None
     appointment_id_str = str(appointment_id) if appointment_id else None
     
+    # DEBUG: Tentar obter o body bruto se Request estiver disponível
+    raw_body = None
+    if request:
+        try:
+            raw_body = await request.json()
+            print(f"📦 RAW BODY do request: {raw_body}")
+        except Exception as e:
+            print(f"⚠️ Erro ao obter raw body: {str(e)}")
+    
     # DEBUG: Log do que foi recebido no update_data
-    # Usar print() também para garantir que apareça nos logs
-    update_data_dict = update_data.model_dump() if hasattr(update_data, 'model_dump') else 'N/A'
+    # IMPORTANTE: Usar model_dump(exclude_none=False) para ver TODOS os campos, incluindo None
+    update_data_dict = update_data.model_dump(exclude_none=False) if hasattr(update_data, 'model_dump') else 'N/A'
     start_datetime_raw = getattr(update_data, 'start_datetime', 'NOT_FOUND')
     service_ids_raw = getattr(update_data, 'service_ids', 'NOT_FOUND')
     
-    print(f"📥 RECEBENDO UPDATE REQUEST | ID: {appointment_id_str} | update_data: {update_data_dict} | start_datetime: {start_datetime_raw} | service_ids: {service_ids_raw}")
+    print(f"📥 RECEBENDO UPDATE REQUEST | ID: {appointment_id_str} | raw_body: {raw_body} | update_data (exclude_none=False): {update_data_dict} | start_datetime: {start_datetime_raw} | service_ids: {service_ids_raw}")
     logger.info(
         f"📥 RECEBENDO UPDATE REQUEST | "
         f"ID: {appointment_id_str} | "
