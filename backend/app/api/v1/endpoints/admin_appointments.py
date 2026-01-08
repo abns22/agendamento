@@ -723,24 +723,22 @@ async def update_appointment(
             detail="Não é possível editar um agendamento finalizado"
         )
     
-    # IMPORTANTE: Obter dados via model_dump() primeiro, que é mais confiável
-    # O Pydantic pode ter validado e convertido os dados, então model_dump() mostra o estado final
-    data_dict = update_data.model_dump()
-    print(f"📋 model_dump completo: {data_dict}")
+    # IMPORTANTE: Verificar os atributos diretamente no objeto, não apenas no model_dump()
+    # porque os campos podem ter sido atribuídos diretamente usando object.__setattr__()
     
     # Determinar quais serviços usar (novos ou atuais)
     has_service_ids = False
     service_ids_provided = None
     
-    # Verificar service_ids no dict
-    if 'service_ids' in data_dict and data_dict['service_ids'] is not None:
-        service_ids_list = data_dict['service_ids']
-        if isinstance(service_ids_list, list) and len(service_ids_list) > 0:
+    # Verificar service_ids diretamente no objeto
+    service_ids_value = getattr(update_data, 'service_ids', None)
+    if service_ids_value is not None:
+        if isinstance(service_ids_value, list) and len(service_ids_value) > 0:
             has_service_ids = True
-            # Converter strings para UUIDs se necessário
+            # Já deve estar como UUIDs, mas garantir
             try:
-                service_ids_provided = [UUID(str(sid)) if not isinstance(sid, UUID) else sid for sid in service_ids_list]
-                print(f"✅ service_ids detectado: {service_ids_provided}")
+                service_ids_provided = [UUID(str(sid)) if not isinstance(sid, UUID) else sid for sid in service_ids_value]
+                print(f"✅ service_ids detectado diretamente no objeto: {service_ids_provided}")
             except (ValueError, TypeError) as e:
                 print(f"❌ Erro ao converter service_ids para UUIDs: {str(e)}")
                 has_service_ids = False
@@ -762,56 +760,54 @@ async def update_appointment(
             )
     
     # Determinar qual horário usar (novo ou atual)
-    # IMPORTANTE: Usar model_dump() que já foi obtido acima
+    # IMPORTANTE: Verificar diretamente no objeto, não apenas no model_dump()
     update_start_datetime = None
     
-    if 'start_datetime' in data_dict and data_dict['start_datetime'] is not None:
-        start_dt_value = data_dict['start_datetime']
-        print(f"🔍 start_datetime no dict: {start_dt_value} | type: {type(start_dt_value)}")
+    start_dt_value = getattr(update_data, 'start_datetime', None)
+    if start_dt_value is not None:
+        print(f"🔍 start_datetime no objeto: {start_dt_value} | type: {type(start_dt_value)}")
         
-        # Se já é datetime, usar diretamente
+        # Se já é datetime, processar
         if isinstance(start_dt_value, datetime):
-            update_start_datetime = start_dt_value
-            print(f"✅ start_datetime já é datetime: {update_start_datetime}")
-        # Se é string, fazer parse
+            # Se tem timezone, converter para o horário local do Brasil
+            if start_dt_value.tzinfo is not None:
+                # Importar ZoneInfo para timezone do Brasil
+                try:
+                    from zoneinfo import ZoneInfo
+                except ImportError:
+                    from backports.zoneinfo import ZoneInfo
+                
+                brazil_tz = ZoneInfo('America/Sao_Paulo')
+                # Converter de UTC para horário do Brasil
+                dt_brazil = start_dt_value.astimezone(brazil_tz)
+                # Remover timezone para salvar no MySQL (que está no horário local)
+                update_start_datetime = dt_brazil.replace(tzinfo=None)
+                print(f"✅ start_datetime convertido de UTC para Brasil: {start_dt_value} -> {update_start_datetime}")
+            else:
+                # Se não tem timezone, assumir que já está no horário local do Brasil
+                update_start_datetime = start_dt_value
+                print(f"✅ start_datetime já está no horário local (sem timezone): {update_start_datetime}")
+        # Se é string, fazer parse (não deveria acontecer, mas por segurança)
         elif isinstance(start_dt_value, str):
             try:
-                # IMPORTANTE: O datetime vem do frontend em UTC (ISO string)
-                # Precisamos converter para o horário local do Brasil antes de salvar
-                # O MySQL armazena no horário local do servidor (Brasil)
-                
-                # Fazer parse do datetime ISO (pode ter timezone ou não)
                 if start_dt_value.endswith('Z'):
-                    # Formato UTC: 2026-01-17T11:00:00.000Z
                     date_str = start_dt_value.replace('Z', '+00:00')
                     parsed_dt = datetime.fromisoformat(date_str)
-                elif '+' in start_dt_value or start_dt_value.count('-') > 2:
-                    # Formato com timezone: 2026-01-17T11:00:00+00:00
-                    parsed_dt = datetime.fromisoformat(start_dt_value)
                 else:
-                    # Formato sem timezone: 2026-01-17T11:00:00 (assumir UTC)
                     parsed_dt = datetime.fromisoformat(start_dt_value)
-                    # Assumir que está em UTC se não tiver timezone
-                    parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+                    if parsed_dt.tzinfo is None:
+                        parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
                 
-                # Se o datetime tem timezone, converter para o horário local do Brasil
                 if parsed_dt.tzinfo is not None:
-                    # Importar ZoneInfo para timezone do Brasil
                     try:
                         from zoneinfo import ZoneInfo
                     except ImportError:
                         from backports.zoneinfo import ZoneInfo
                     
                     brazil_tz = ZoneInfo('America/Sao_Paulo')
-                    # Converter de UTC para horário do Brasil
                     dt_brazil = parsed_dt.astimezone(brazil_tz)
-                    # Remover timezone para salvar no MySQL (que está no horário local)
                     update_start_datetime = dt_brazil.replace(tzinfo=None)
-                    print(f"✅ start_datetime convertido de UTC para Brasil: {parsed_dt} -> {update_start_datetime}")
-                else:
-                    # Se não tem timezone, assumir que já está no horário local do Brasil
-                    update_start_datetime = parsed_dt
-                    print(f"✅ start_datetime parseado (sem timezone, assumindo Brasil): {update_start_datetime}")
+                    print(f"✅ start_datetime parseado e convertido: {update_start_datetime}")
             except Exception as parse_error:
                 print(f"❌ Erro ao fazer parse de start_datetime '{start_dt_value}': {str(parse_error)}")
                 raise HTTPException(
@@ -821,7 +817,7 @@ async def update_appointment(
         else:
             print(f"⚠️ start_datetime tem tipo inesperado: {type(start_dt_value)}")
     else:
-        print(f"⚠️ start_datetime não encontrado no dict ou é None")
+        print(f"⚠️ start_datetime não encontrado no objeto ou é None")
     
     # DEBUG: Verificar o que foi recebido
     print(f"🔍 VERIFICANDO start_datetime | ID: {appointment_id_str} | type: {type(update_start_datetime)} | value: {update_start_datetime} | is None: {update_start_datetime is None}")
