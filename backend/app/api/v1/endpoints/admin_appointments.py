@@ -571,11 +571,10 @@ async def get_appointment(
     description="Atualiza um agendamento existente (status, horário, serviços). Valida conflitos de horário ao editar."
 )
 async def update_appointment(
+    request: Request,
     appointment_id: UUID = Path(..., description="UUID do agendamento"),
-    update_data: AppointmentUpdate = Body(...),
     tenant: Tenant = Depends(verify_subscription_access),
-    db: AsyncSession = Depends(get_db),
-    request: Request = None
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Atualiza um agendamento existente.
@@ -609,8 +608,21 @@ async def update_appointment(
     tenant_id_str = str(tenant.id) if tenant.id else None
     appointment_id_str = str(appointment_id) if appointment_id else None
     
-    # DEBUG: Verificar o que foi parseado pelo Pydantic
-    # O problema pode ser que o Pydantic não está recebendo os campos corretamente
+    # IMPORTANTE: Fazer parse manual do JSON porque o Pydantic não está recebendo os campos
+    # Ler o body diretamente do request
+    try:
+        raw_body = await request.json()
+        print(f"📦 RAW BODY do request: {raw_body}")
+        
+        # Criar AppointmentUpdate a partir do raw_body
+        update_data = AppointmentUpdate(**raw_body)
+        print(f"✅ AppointmentUpdate criado a partir do raw_body: {update_data.model_dump(exclude_none=False)}")
+    except Exception as e:
+        print(f"❌ Erro ao fazer parse do body: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Erro ao processar dados da requisição: {str(e)}"
+        )
     
     # DEBUG: Log do que foi recebido no update_data
     # IMPORTANTE: Usar model_dump(exclude_none=False) para ver TODOS os campos, incluindo None
