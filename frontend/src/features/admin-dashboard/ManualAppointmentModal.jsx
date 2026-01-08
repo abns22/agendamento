@@ -355,19 +355,21 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
     setError(null)
 
     try {
-      // Combinar data e hora selecionados (timezone local)
+      // Combinar data e hora selecionados (timezone local do Brasil)
       const [hours, minutes] = selectedTime.split(':')
       const dateTime = new Date(selectedDate)
       dateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
       
-      // Converter para UTC (o backend espera UTC e confia que já está em UTC)
-      const utcDateTime = new Date(dateTime.getTime() - (dateTime.getTimezoneOffset() * 60000))
+      // IMPORTANTE: O backend armazena no horário local do servidor (Brasil)
+      // Não fazer conversão para UTC - enviar o datetime como está no horário local
+      // Usar toISOString() que já inclui o timezone correto
+      const localDateTime = dateTime.toISOString()
       
       if (isEditMode && appointment) {
         // Modo edição: PUT para atualizar agendamento
         const payload = {
           service_ids: selectedServices.map(s => s.id), // Array de IDs de serviços
-          start_datetime: utcDateTime.toISOString()
+          start_datetime: localDateTime
         }
         
         console.log('📝 Editando agendamento:', {
@@ -376,7 +378,11 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
           originalServices: appointment.service_ids,
           newServices: payload.service_ids,
           originalDateTime: appointment.start_datetime,
-          newDateTime: payload.start_datetime
+          newDateTime: payload.start_datetime,
+          selectedDate: selectedDate,
+          selectedTime: selectedTime,
+          dateTimeLocal: dateTime,
+          dateTimeISO: localDateTime
         })
         
         try {
@@ -436,7 +442,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
         const payload = {
           // tenant_id é inferido pelo backend a partir do token/header
           service_ids: selectedServices.map(s => s.id), // Array de IDs de serviços
-          data_agendamento: utcDateTime.toISOString(),
+          data_agendamento: localDateTime,
           cliente_nome: customerName.trim(),
           cliente_contato: customerContact.trim(),
           // Se cliente foi selecionado, enviar client_id, senão enviar apenas dados para criar/buscar

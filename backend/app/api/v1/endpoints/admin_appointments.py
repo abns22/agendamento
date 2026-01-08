@@ -718,16 +718,48 @@ async def update_appointment(
         # Se é string, fazer parse
         elif isinstance(start_dt_value, str):
             try:
-                # Formato ISO: 2026-01-17T11:00:00.000Z ou 2026-01-17T11:00:00+00:00
+                # IMPORTANTE: O datetime vem do frontend em UTC (ISO string)
+                # Precisamos converter para o horário local do Brasil antes de salvar
+                # O MySQL armazena no horário local do servidor (Brasil)
+                
+                # Fazer parse do datetime ISO (pode ter timezone ou não)
                 if start_dt_value.endswith('Z'):
-                    # Remover Z e adicionar +00:00 para fromisoformat
+                    # Formato UTC: 2026-01-17T11:00:00.000Z
                     date_str = start_dt_value.replace('Z', '+00:00')
+                    parsed_dt = datetime.fromisoformat(date_str)
+                elif '+' in start_dt_value or start_dt_value.count('-') > 2:
+                    # Formato com timezone: 2026-01-17T11:00:00+00:00
+                    parsed_dt = datetime.fromisoformat(start_dt_value)
                 else:
-                    date_str = start_dt_value
-                update_start_datetime = datetime.fromisoformat(date_str)
-                print(f"✅ start_datetime parseado de string: {update_start_datetime}")
+                    # Formato sem timezone: 2026-01-17T11:00:00 (assumir UTC)
+                    parsed_dt = datetime.fromisoformat(start_dt_value)
+                    # Assumir que está em UTC se não tiver timezone
+                    parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+                
+                # Se o datetime tem timezone, converter para o horário local do Brasil
+                if parsed_dt.tzinfo is not None:
+                    # Importar ZoneInfo para timezone do Brasil
+                    try:
+                        from zoneinfo import ZoneInfo
+                    except ImportError:
+                        from backports.zoneinfo import ZoneInfo
+                    
+                    brazil_tz = ZoneInfo('America/Sao_Paulo')
+                    # Converter de UTC para horário do Brasil
+                    dt_brazil = parsed_dt.astimezone(brazil_tz)
+                    # Remover timezone para salvar no MySQL (que está no horário local)
+                    update_start_datetime = dt_brazil.replace(tzinfo=None)
+                    print(f"✅ start_datetime convertido de UTC para Brasil: {parsed_dt} -> {update_start_datetime}")
+                else:
+                    # Se não tem timezone, assumir que já está no horário local do Brasil
+                    update_start_datetime = parsed_dt
+                    print(f"✅ start_datetime parseado (sem timezone, assumindo Brasil): {update_start_datetime}")
             except Exception as parse_error:
                 print(f"❌ Erro ao fazer parse de start_datetime '{start_dt_value}': {str(parse_error)}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Formato de data/hora inválido: {str(parse_error)}"
+                )
         else:
             print(f"⚠️ start_datetime tem tipo inesperado: {type(start_dt_value)}")
     else:
@@ -747,9 +779,18 @@ async def update_appointment(
     has_start_datetime = update_start_datetime is not None
     new_start_datetime = update_start_datetime if has_start_datetime else appointment.start_datetime
     
-    # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
+    # Garantir que o datetime está timezone-naive (já convertido para horário local do Brasil)
     if new_start_datetime and hasattr(new_start_datetime, 'tzinfo') and new_start_datetime.tzinfo is not None:
-        new_start_datetime = new_start_datetime.replace(tzinfo=None)
+        # Se ainda tem timezone, converter para horário local do Brasil
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        
+        brazil_tz = ZoneInfo('America/Sao_Paulo')
+        dt_brazil = new_start_datetime.astimezone(brazil_tz)
+        new_start_datetime = dt_brazil.replace(tzinfo=None)
+        print(f"🔄 Convertendo datetime com timezone para Brasil: {new_start_datetime}")
     
     # DEBUG: Log para verificar o que está sendo recebido
     print(f"🔄 UPDATE APPOINTMENT DEBUG | ID: {appointment_id_str} | has_start_datetime: {has_start_datetime} | has_service_ids: {has_service_ids} | will_update: {has_start_datetime or has_service_ids}")
@@ -1343,10 +1384,27 @@ async def reschedule_appointment(
             service_ids=[UUID(sid) for sid in new_service_ids]
         )
         
-        # Processar nova data/hora (confiar que está em UTC)
-        start_datetime_utc = reschedule_data.data_agendamento
-        if start_datetime_utc.tzinfo is not None:
-            start_datetime_utc = start_datetime_utc.replace(tzinfo=None)
+        # Processar nova data/hora
+        # IMPORTANTE: O datetime vem do frontend em UTC (ISO string)
+        # Precisamos converter para o horário local do Brasil antes de salvar
+        # O MySQL armazena no horário local do servidor (Brasil)
+        start_datetime_received = reschedule_data.data_agendamento
+        
+        # Se tem timezone, converter para horário local do Brasil
+        if start_datetime_received.tzinfo is not None:
+            try:
+                from zoneinfo import ZoneInfo
+            except ImportError:
+                from backports.zoneinfo import ZoneInfo
+            
+            brazil_tz = ZoneInfo('America/Sao_Paulo')
+            # Converter de UTC para horário do Brasil
+            dt_brazil = start_datetime_received.astimezone(brazil_tz)
+            # Remover timezone para salvar no MySQL (que está no horário local)
+            start_datetime_utc = dt_brazil.replace(tzinfo=None)
+        else:
+            # Se não tem timezone, assumir que já está no horário local do Brasil
+            start_datetime_utc = start_datetime_received
 
         # Calcular novo horário de fim baseado na duração total
         end_datetime_utc = AppointmentService.calculate_end_datetime(
@@ -1527,12 +1585,27 @@ async def create_manual_appointment(
             service_ids=service_ids
         )
         
-        # Passo 4: Processar data_agendamento (confiar que está em UTC)
-        start_datetime_utc = appointment_data.data_agendamento
+        # Passo 4: Processar data_agendamento
+        # IMPORTANTE: O datetime vem do frontend em UTC (ISO string)
+        # Precisamos converter para o horário local do Brasil antes de salvar
+        # O MySQL armazena no horário local do servidor (Brasil)
+        start_datetime_received = appointment_data.data_agendamento
         
-        # Remover timezone se presente (timezone-naive para compatibilidade com PostgreSQL)
-        if start_datetime_utc.tzinfo is not None:
-            start_datetime_utc = start_datetime_utc.replace(tzinfo=None)
+        # Se tem timezone, converter para horário local do Brasil
+        if start_datetime_received.tzinfo is not None:
+            try:
+                from zoneinfo import ZoneInfo
+            except ImportError:
+                from backports.zoneinfo import ZoneInfo
+            
+            brazil_tz = ZoneInfo('America/Sao_Paulo')
+            # Converter de UTC para horário do Brasil
+            dt_brazil = start_datetime_received.astimezone(brazil_tz)
+            # Remover timezone para salvar no MySQL (que está no horário local)
+            start_datetime_utc = dt_brazil.replace(tzinfo=None)
+        else:
+            # Se não tem timezone, assumir que já está no horário local do Brasil
+            start_datetime_utc = start_datetime_received
         
         # Calcular valor total com promoções
         total_value = await AppointmentService.calculate_total_value(
