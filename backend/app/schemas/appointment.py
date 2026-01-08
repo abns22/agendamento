@@ -172,9 +172,8 @@ class AppointmentUpdate(BaseModel):
     @model_validator(mode='after')
     def normalize_service_ids(self):
         """Normaliza service_ids: se service_id único for fornecido, converte para lista."""
-        # Garantir que service_ids sempre existe (mesmo que seja None)
-        if not hasattr(self, 'service_ids') or self.service_ids is None:
-            self.service_ids = None
+        # IMPORTANTE: Não remover campos que foram fornecidos
+        # Apenas normalizar se necessário
         
         # Se service_ids não foi fornecido mas service_id foi, converter para lista
         if (not self.service_ids or len(self.service_ids) == 0) and self.service_id:

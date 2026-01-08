@@ -613,12 +613,37 @@ async def update_appointment(
     try:
         raw_body = await request.json()
         print(f"📦 RAW BODY do request: {raw_body}")
+        print(f"📦 RAW BODY type: {type(raw_body)}")
+        print(f"📦 RAW BODY keys: {raw_body.keys() if isinstance(raw_body, dict) else 'N/A'}")
+        
+        # Verificar se os campos estão presentes
+        if 'start_datetime' in raw_body:
+            print(f"📦 start_datetime no raw_body: {raw_body['start_datetime']} (type: {type(raw_body['start_datetime'])})")
+        if 'service_ids' in raw_body:
+            print(f"📦 service_ids no raw_body: {raw_body['service_ids']} (type: {type(raw_body['service_ids'])})")
         
         # Criar AppointmentUpdate a partir do raw_body
-        update_data = AppointmentUpdate(**raw_body)
-        print(f"✅ AppointmentUpdate criado a partir do raw_body: {update_data.model_dump(exclude_none=False)}")
+        # IMPORTANTE: Usar model_validate para garantir que o Pydantic faça a validação correta
+        try:
+            update_data = AppointmentUpdate.model_validate(raw_body)
+            print(f"✅ AppointmentUpdate criado via model_validate: {update_data.model_dump(exclude_none=False)}")
+        except Exception as validate_error:
+            print(f"⚠️ Erro ao usar model_validate: {str(validate_error)}")
+            # Tentar criar diretamente
+            update_data = AppointmentUpdate(**raw_body)
+            print(f"✅ AppointmentUpdate criado via **raw_body: {update_data.model_dump(exclude_none=False)}")
+        
+        # Verificar diretamente os atributos
+        print(f"🔍 Verificando atributos diretamente:")
+        print(f"  - hasattr start_datetime: {hasattr(update_data, 'start_datetime')}")
+        print(f"  - start_datetime value: {getattr(update_data, 'start_datetime', 'NOT_FOUND')}")
+        print(f"  - hasattr service_ids: {hasattr(update_data, 'service_ids')}")
+        print(f"  - service_ids value: {getattr(update_data, 'service_ids', 'NOT_FOUND')}")
+        
     except Exception as e:
         print(f"❌ Erro ao fazer parse do body: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=400,
             detail=f"Erro ao processar dados da requisição: {str(e)}"
