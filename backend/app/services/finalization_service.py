@@ -259,16 +259,30 @@ class FinalizationService:
                     f"A soma dos pagamentos ({total_paid}) deve ser igual ao valor final após desconto ({final_value_after_discount})"
                 )
         
-        # 7. Ajustar net_value se não há pagamentos agora mas há valor a receber
-        # Quando o pagamento é totalmente a prazo, o net_value será o valor a receber
-        # (sem taxas, pois será pago depois)
-        if not payment_entries_to_create and value_due is not None and value_due > Decimal('0.00'):
-            net_value = value_due
+        # 7. Ajustar net_value baseado em is_paid e pagamentos
+        # IMPORTANTE: 
+        # - Se is_paid=False e não há pagamentos (conta a receber total): net_value = 0
+        # - Se há pagamentos parciais: net_value = valor dos pagamentos (já calculado acima)
+        # - Se is_paid=True: net_value = valor total (já calculado acima)
+        # O net_value já foi calculado considerando apenas os pagamentos imediatos (payment_entries_to_create)
+        # Se não há pagamentos imediatos e is_paid=False, então net_value deve ser 0
+        if not payment_entries_to_create and not is_paid:
+            # Pagamento totalmente a prazo: não registrar no caixa ainda
+            # O net_value será 0 e será atualizado quando receber a conta
+            net_value_for_cash = Decimal('0.00')
+            total_profit_for_cash = Decimal('0.00') - total_cost  # Lucro negativo (custo já foi)
+        else:
+            # Pagamento à vista ou parcial: usar o net_value calculado dos pagamentos feitos agora
+            # O net_value já foi calculado considerando apenas os pagamentos imediatos
+            net_value_for_cash = net_value
+            total_profit_for_cash = net_value - total_cost
         
         # 8. Calcular lucro
-        total_profit = net_value - total_cost
+        total_profit = total_profit_for_cash
         
         # 9. Criar Transaction
+        # IMPORTANTE: Se is_paid=False, o net_value será 0 (não entra no caixa ainda)
+        # O net_value será atualizado quando receber a conta a receber
         # Usar datetime.now() (timezone-naive, horário local) para que a data do pagamento
         # seja registrada no dia correto conforme o timezone local do servidor
         # Isso garante que pagamentos feitos no dia 25 apareçam no caixa do dia 25
@@ -278,9 +292,9 @@ class FinalizationService:
             date_time=datetime.now(),
             gross_value=gross_value,  # Valor bruto original (para histórico)
             discount=discount_value,  # Valor do desconto aplicado
-            net_value=net_value,  # Valor líquido (após desconto e taxas)
+            net_value=net_value_for_cash,  # Valor líquido (0 se conta a receber, senão valor calculado)
             total_cost=total_cost,
-            total_profit=total_profit,
+            total_profit=total_profit_for_cash,  # Lucro (negativo se conta a receber, senão calculado)
             additional_cost=additional_cost,
             is_paid=is_paid
         )

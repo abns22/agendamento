@@ -233,7 +233,7 @@ async def settle_debtor(
             installments=installments
         )
         
-        # O valor pago é o valor devido (já está no net_value da transaction)
+        # O valor pago é o valor devido
         # A taxa será descontada do valor que entra no caixa
         value_paid = value_to_pay
         net_value_received = value_paid - fee
@@ -262,8 +262,25 @@ async def settle_debtor(
         
         db.add(payment_entry)
         
-        # 8. Atualizar Transaction.is_paid para True
+        # 8. Atualizar Transaction: is_paid=True, net_value e total_profit
+        # IMPORTANTE: Quando recebe a conta a receber, atualizar o net_value e total_profit
+        # Se havia pagamento parcial, somar o valor recebido ao net_value existente
+        # Se era pagamento totalmente a prazo, usar o net_value_received diretamente
         transaction.is_paid = True
+        
+        # Se havia pagamento parcial, somar o valor recebido ao net_value existente
+        # Se era totalmente a prazo, o net_value era 0, então usar net_value_received
+        if transaction.net_value and transaction.net_value > Decimal('0.00'):
+            # Pagamento parcial: somar o valor recebido ao que já estava no caixa
+            transaction.net_value = transaction.net_value + net_value_received
+        else:
+            # Pagamento totalmente a prazo: usar o valor recebido
+            transaction.net_value = net_value_received
+        
+        # Recalcular total_profit: net_value total - total_cost
+        transaction.total_profit = transaction.net_value - (transaction.total_cost or Decimal('0.00'))
+        # Atualizar date_time para a data de recebimento (não a data de finalização)
+        transaction.date_time = datetime.now()
         
         # 9. Atualizar Debtor
         debtor.status = DebtorStatus.PAID
