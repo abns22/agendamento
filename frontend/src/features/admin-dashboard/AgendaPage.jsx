@@ -38,7 +38,6 @@ const AgendaPage = () => {
   const [isManualAppointmentModalOpen, setIsManualAppointmentModalOpen] = useState(false)
   const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false)
   const [editingAppointment, setEditingAppointment] = useState(null)
-  const [showActionMenu, setShowActionMenu] = useState(false)
   const [selectedService, setSelectedService] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [cancellationReason, setCancellationReason] = useState('')
@@ -636,60 +635,6 @@ const AgendaPage = () => {
             </p>
           </div>
           
-          {/* Botão de Ações com Menu */}
-          <div className="relative">
-            <div className="flex justify-end">
-              <Button
-                onClick={() => setShowActionMenu(!showActionMenu)}
-                variant="primary"
-                className="flex items-center gap-2"
-              >
-                <span className="text-xl">+</span>
-                <span className="hidden sm:inline">Nova Ação</span>
-              </Button>
-            </div>
-            
-            {/* Menu Dropdown */}
-            {showActionMenu && (
-              <>
-                {/* Overlay para fechar ao clicar fora */}
-                <div
-                  className="fixed inset-0 z-10"
-                  onClick={() => setShowActionMenu(false)}
-                />
-                {/*
-                  Menu responsivo:
-                  - Em mobile: alinhado à direita da tela com margem, abaixo do topo
-                  - Em telas maiores: alinhado à direita do botão (dropdown clássico)
-                */}
-                <div
-                  className="fixed sm:absolute z-20 w-56 max-w-[calc(100vw-2rem)] 
-                             right-4 top-20
-                             sm:right-0 sm:top-auto sm:mt-2
-                             bg-white rounded-lg shadow-lg border border-gray-200"
-                >
-                  <button
-                    onClick={() => {
-                      setIsManualAppointmentModalOpen(true)
-                      setShowActionMenu(false)
-                    }}
-                    className="w-full text-left px-4 py-3 hover:bg-gray-50 rounded-t-lg transition-colors"
-                  >
-                    <span className="font-semibold text-text">📅 Agendamento Manual</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      handleOpenBlockModal()
-                      setShowActionMenu(false)
-                    }}
-                    className="w-full text-left px-4 py-3 hover:bg-gray-50 rounded-b-lg transition-colors"
-                  >
-                    <span className="font-semibold text-text">⏸️ Registrar Pausa</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
         </div>
         
         {/* Barra de Ferramentas de Filtros */}
@@ -857,8 +802,14 @@ const AgendaPage = () => {
                     : 'Neste período'
               }
             </p>
-            <Button onClick={handleOpenBlockModal} variant="primary">
-              Marcar Horário Manualmente
+            <Button 
+              onClick={() => {
+                setIsManualAppointmentModalOpen(true)
+                setEditingAppointment(null)
+              }} 
+              variant="primary"
+            >
+              Criar Agendamento Manual
             </Button>
           </div>
         </Card>
@@ -1232,11 +1183,15 @@ const AgendaPage = () => {
         </form>
       </Modal>
 
-      {/* Botão FAB para Criar Bloqueio */}
+      {/* Botão FAB para Criar Agendamento Manual */}
       <button
-        onClick={handleOpenBlockModal}
-        className="fixed bottom-24 sm:bottom-8 right-4 sm:right-8 w-14 h-14 bg-primary text-white rounded-full shadow-lg hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all flex items-center justify-center z-30"
-        aria-label="Marcar horário manualmente"
+        onClick={() => {
+          setIsManualAppointmentModalOpen(true)
+          setEditingAppointment(null)
+        }}
+        className="fixed bottom-8 right-4 sm:right-8 w-14 h-14 bg-primary text-white rounded-full shadow-lg hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all flex items-center justify-center z-30"
+        aria-label="Criar agendamento manual"
+        title="Criar agendamento manual"
       >
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
