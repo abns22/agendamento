@@ -1189,7 +1189,7 @@ const AgendaPage = () => {
           setIsManualAppointmentModalOpen(true)
           setEditingAppointment(null)
         }}
-        className="fixed bottom-32 sm:bottom-36 right-4 sm:right-8 w-14 h-14 bg-primary text-white rounded-full shadow-lg hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all flex items-center justify-center z-30"
+        className="fixed bottom-24 sm:bottom-28 right-4 sm:right-8 w-14 h-14 bg-primary text-white rounded-full shadow-lg hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all flex items-center justify-center z-30"
         aria-label="Criar agendamento manual"
         title="Criar agendamento manual"
       >
