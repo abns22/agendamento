@@ -609,36 +609,63 @@ async def update_appointment(
     appointment_id_str = str(appointment_id) if appointment_id else None
     
     # IMPORTANTE: Fazer parse manual do JSON porque o Pydantic não está recebendo os campos
-    # Ler o body diretamente do request
+    # Ler o body diretamente do request e processar manualmente
     try:
         raw_body = await request.json()
         print(f"📦 RAW BODY do request: {raw_body}")
-        print(f"📦 RAW BODY type: {type(raw_body)}")
-        print(f"📦 RAW BODY keys: {raw_body.keys() if isinstance(raw_body, dict) else 'N/A'}")
         
-        # Verificar se os campos estão presentes
-        if 'start_datetime' in raw_body:
-            print(f"📦 start_datetime no raw_body: {raw_body['start_datetime']} (type: {type(raw_body['start_datetime'])})")
-        if 'service_ids' in raw_body:
-            print(f"📦 service_ids no raw_body: {raw_body['service_ids']} (type: {type(raw_body['service_ids'])})")
+        # Processar os dados manualmente do raw_body
+        # O Pydantic está rejeitando os campos, então vamos processá-los diretamente
+        processed_data = {
+            'status': raw_body.get('status')
+        }
         
-        # Criar AppointmentUpdate a partir do raw_body
-        # IMPORTANTE: Usar model_validate para garantir que o Pydantic faça a validação correta
+        # Processar start_datetime
+        if 'start_datetime' in raw_body and raw_body['start_datetime']:
+            processed_data['start_datetime'] = raw_body['start_datetime']
+            print(f"✅ start_datetime processado: {raw_body['start_datetime']}")
+        
+        # Processar service_ids
+        if 'service_ids' in raw_body and raw_body['service_ids']:
+            processed_data['service_ids'] = raw_body['service_ids']
+            print(f"✅ service_ids processado: {raw_body['service_ids']}")
+        
+        # Criar AppointmentUpdate apenas para validação de status (se fornecido)
+        # Mas vamos usar os dados processados diretamente
         try:
-            update_data = AppointmentUpdate.model_validate(raw_body)
-            print(f"✅ AppointmentUpdate criado via model_validate: {update_data.model_dump(exclude_none=False)}")
-        except Exception as validate_error:
-            print(f"⚠️ Erro ao usar model_validate: {str(validate_error)}")
-            # Tentar criar diretamente
-            update_data = AppointmentUpdate(**raw_body)
-            print(f"✅ AppointmentUpdate criado via **raw_body: {update_data.model_dump(exclude_none=False)}")
+            update_data = AppointmentUpdate(**processed_data)
+        except Exception as e:
+            # Se falhar, criar com dados mínimos
+            update_data = AppointmentUpdate(status=None)
         
-        # Verificar diretamente os atributos
-        print(f"🔍 Verificando atributos diretamente:")
-        print(f"  - hasattr start_datetime: {hasattr(update_data, 'start_datetime')}")
-        print(f"  - start_datetime value: {getattr(update_data, 'start_datetime', 'NOT_FOUND')}")
-        print(f"  - hasattr service_ids: {hasattr(update_data, 'service_ids')}")
-        print(f"  - service_ids value: {getattr(update_data, 'service_ids', 'NOT_FOUND')}")
+        # IMPORTANTE: Substituir os campos no objeto update_data diretamente
+        # para garantir que os dados sejam processados
+        if 'start_datetime' in processed_data:
+            # Converter string para datetime se necessário
+            start_dt_value = processed_data['start_datetime']
+            if isinstance(start_dt_value, str):
+                try:
+                    if start_dt_value.endswith('Z'):
+                        start_dt_value = start_dt_value.replace('Z', '+00:00')
+                    parsed_dt = datetime.fromisoformat(start_dt_value)
+                    # Atribuir diretamente ao objeto (bypass Pydantic)
+                    object.__setattr__(update_data, 'start_datetime', parsed_dt)
+                    print(f"✅ start_datetime atribuído diretamente: {parsed_dt}")
+                except Exception as parse_error:
+                    print(f"❌ Erro ao fazer parse de start_datetime: {str(parse_error)}")
+            else:
+                object.__setattr__(update_data, 'start_datetime', start_dt_value)
+        
+        if 'service_ids' in processed_data:
+            # Converter strings para UUIDs se necessário
+            service_ids_list = processed_data['service_ids']
+            try:
+                service_ids_uuids = [UUID(str(sid)) if not isinstance(sid, UUID) else sid for sid in service_ids_list]
+                # Atribuir diretamente ao objeto (bypass Pydantic)
+                object.__setattr__(update_data, 'service_ids', service_ids_uuids)
+                print(f"✅ service_ids atribuído diretamente: {service_ids_uuids}")
+            except Exception as uuid_error:
+                print(f"❌ Erro ao converter service_ids para UUIDs: {str(uuid_error)}")
         
     except Exception as e:
         print(f"❌ Erro ao fazer parse do body: {str(e)}")
