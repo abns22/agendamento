@@ -161,7 +161,6 @@ class AppointmentUpdate(BaseModel):
     start_datetime: Optional[datetime] = Field(default=None, description="Nova data e hora de início do agendamento (UTC)")
     service_ids: Optional[List[UUID]] = Field(
         default=None,
-        min_length=1,
         description="Nova lista de UUIDs dos serviços (opcional, mantém os atuais se não for enviado)"
     )
     # Compatibilidade retroativa

@@ -3,7 +3,7 @@ Endpoints administrativos para gerenciamento de Agendamentos.
 
 Permite que administradores visualizem e gerenciem agendamentos de clientes.
 """
-from fastapi import APIRouter, HTTPException, Depends, Path, Query, BackgroundTasks, Request
+from fastapi import APIRouter, HTTPException, Depends, Path, Query, BackgroundTasks, Request, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
@@ -571,11 +571,11 @@ async def get_appointment(
     description="Atualiza um agendamento existente (status, horário, serviços). Valida conflitos de horário ao editar."
 )
 async def update_appointment(
-    request: Request,
     appointment_id: UUID = Path(..., description="UUID do agendamento"),
-    update_data: AppointmentUpdate = ...,
+    update_data: AppointmentUpdate = Body(...),
     tenant: Tenant = Depends(verify_subscription_access),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None
 ):
     """
     Atualiza um agendamento existente.
@@ -609,14 +609,8 @@ async def update_appointment(
     tenant_id_str = str(tenant.id) if tenant.id else None
     appointment_id_str = str(appointment_id) if appointment_id else None
     
-    # DEBUG: Tentar obter o body bruto se Request estiver disponível
-    raw_body = None
-    if request:
-        try:
-            raw_body = await request.json()
-            print(f"📦 RAW BODY do request: {raw_body}")
-        except Exception as e:
-            print(f"⚠️ Erro ao obter raw body: {str(e)}")
+    # DEBUG: Verificar o que foi parseado pelo Pydantic
+    # O problema pode ser que o Pydantic não está recebendo os campos corretamente
     
     # DEBUG: Log do que foi recebido no update_data
     # IMPORTANTE: Usar model_dump(exclude_none=False) para ver TODOS os campos, incluindo None
@@ -624,7 +618,7 @@ async def update_appointment(
     start_datetime_raw = getattr(update_data, 'start_datetime', 'NOT_FOUND')
     service_ids_raw = getattr(update_data, 'service_ids', 'NOT_FOUND')
     
-    print(f"📥 RECEBENDO UPDATE REQUEST | ID: {appointment_id_str} | raw_body: {raw_body} | update_data (exclude_none=False): {update_data_dict} | start_datetime: {start_datetime_raw} | service_ids: {service_ids_raw}")
+    print(f"📥 RECEBENDO UPDATE REQUEST | ID: {appointment_id_str} | update_data (exclude_none=False): {update_data_dict} | start_datetime: {start_datetime_raw} | service_ids: {service_ids_raw}")
     logger.info(
         f"📥 RECEBENDO UPDATE REQUEST | "
         f"ID: {appointment_id_str} | "
