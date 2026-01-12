@@ -79,10 +79,21 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
             const dateStr = format(startDate, 'yyyy-MM-dd')
             setIsLoadingSlots(true)
             const response = await api.get(`/api/v1/admin/appointments/availability?date=${dateStr}`)
-            setAvailableSlots(response.data?.available_slots || [])
+            const slots = response.data?.available_slots || []
+            
+            // Adicionar o horário atual do agendamento à lista de slots se não estiver lá
+            const currentTime = `${hours}:${minutes}`
+            if (!slots.includes(currentTime)) {
+              slots.push(currentTime)
+              slots.sort() // Ordenar para manter a ordem
+            }
+            
+            setAvailableSlots(slots)
           } catch (err) {
             console.error('Erro ao buscar disponibilidade:', err)
-            setAvailableSlots([])
+            // Em caso de erro, ainda mostrar o horário atual
+            const currentTime = `${hours}:${minutes}`
+            setAvailableSlots([currentTime])
           } finally {
             setIsLoadingSlots(false)
           }
@@ -387,9 +398,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
           originalDateTime: appointment.start_datetime,
           newDateTime: payload.start_datetime,
           selectedDate: selectedDate,
-          selectedTime: selectedTime,
-          dateTimeLocal: dateTime,
-          dateTimeISO: localDateTime
+          selectedTime: selectedTime
         })
         
         try {
