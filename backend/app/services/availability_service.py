@@ -167,6 +167,13 @@ class AvailabilityService:
         stop_times_result = await db_session.execute(stop_times_query)
         stop_times = stop_times_result.scalars().all()
         
+        # DEBUG: Log para investigar problema no sábado
+        print(f"🔍 DEBUG STOP_TIMES (get_available_slots) | date_str: {date_str} | day_of_week: {day_of_week} | tenant_id: {tenant_id_str}")
+        print(f"🔍 DEBUG STOP_TIMES | stop_times encontrados: {len(stop_times)}")
+        for st in stop_times:
+            print(f"🔍 DEBUG STOP_TIMES | - {st.start_time} - {st.end_time} ({st.description})")
+        print(f"🔍 DEBUG SCHEDULE_CONFIG | opening_time: {opening_time} | closing_time: {closing_time}")
+        
         # ============================================================
         # PASSO 5: GERAÇÃO DE SLOTS CANDIDATOS
         # ============================================================
@@ -538,6 +545,13 @@ class AvailabilityService:
         )
         stop_times_result = await db_session.execute(stop_times_query)
         stop_times = stop_times_result.scalars().all()
+        
+        # DEBUG: Log para investigar problema no sábado
+        print(f"🔍 DEBUG STOP_TIMES (get_available_slots_with_duration) | date_str: {date_str} | day_of_week: {day_of_week} | tenant_id: {tenant_id_str}")
+        print(f"🔍 DEBUG STOP_TIMES | stop_times encontrados: {len(stop_times)}")
+        for st in stop_times:
+            print(f"🔍 DEBUG STOP_TIMES | - {st.start_time} - {st.end_time} ({st.description})")
+        print(f"🔍 DEBUG SCHEDULE_CONFIG | opening_time: {opening_time} | closing_time: {closing_time}")
         
         available_slots = []
         slot_interval = timedelta(minutes=AvailabilityService.DEFAULT_SLOT_INTERVAL_MINUTES)
