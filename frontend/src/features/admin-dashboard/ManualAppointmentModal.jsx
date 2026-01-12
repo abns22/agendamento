@@ -279,7 +279,7 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
   const hasChanges = isEditMode && (
     totalDuration !== originalDuration || 
     totalValue !== originalValue ||
-    (appointment && selectedTime && (() => {
+    (appointment && selectedTime && selectedDate && (() => {
       const [hours, minutes] = selectedTime.split(':')
       const newDateTime = new Date(selectedDate)
       newDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
@@ -295,16 +295,19 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
       return false
     }
     
-    // Validar data e horário
-    if (!selectedDate) {
-      setError('Selecione uma data')
-      return false
+    // Em modo criação, validar data e horário
+    if (!isEditMode) {
+      if (!selectedDate) {
+        setError('Selecione uma data')
+        return false
+      }
+      
+      if (!selectedTime) {
+        setError('Selecione um horário disponível')
+        return false
+      }
     }
-    
-    if (!selectedTime) {
-      setError('Selecione um horário disponível')
-      return false
-    }
+    // Em modo edição, data/hora são opcionais (se não selecionar, mantém o atual)
     
     // Validar nome do cliente
     if (!customerName.trim() || customerName.trim().length < 2) {
@@ -355,21 +358,25 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
     setError(null)
 
     try {
-      // Combinar data e hora selecionados (timezone local do Brasil)
-      const [hours, minutes] = selectedTime.split(':')
-      const dateTime = new Date(selectedDate)
-      dateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
-      
-      // IMPORTANTE: O backend armazena no horário local do servidor (Brasil)
-      // Não fazer conversão para UTC - enviar o datetime como está no horário local
-      // Usar toISOString() que já inclui o timezone correto
-      const localDateTime = dateTime.toISOString()
-      
       if (isEditMode && appointment) {
         // Modo edição: PUT para atualizar agendamento
         const payload = {
-          service_ids: selectedServices.map(s => s.id), // Array de IDs de serviços
-          start_datetime: localDateTime
+          service_ids: selectedServices.map(s => s.id) // Array de IDs de serviços
+        }
+        
+        // Se data e hora foram selecionados, enviar start_datetime
+        // Se não, não enviar (mantém o horário atual do agendamento)
+        if (selectedDate && selectedTime) {
+          // Combinar data e hora selecionados (timezone local do Brasil)
+          const [hours, minutes] = selectedTime.split(':')
+          const dateTime = new Date(selectedDate)
+          dateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
+          
+          // IMPORTANTE: O backend armazena no horário local do servidor (Brasil)
+          // Não fazer conversão para UTC - enviar o datetime como está no horário local
+          // Usar toISOString() que já inclui o timezone correto
+          const localDateTime = dateTime.toISOString()
+          payload.start_datetime = localDateTime
         }
         
         console.log('📝 Editando agendamento:', {
@@ -439,6 +446,16 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
         }
       } else {
         // Modo criação: POST para criar novo agendamento
+        // Combinar data e hora selecionados (timezone local do Brasil)
+        const [hours, minutes] = selectedTime.split(':')
+        const dateTime = new Date(selectedDate)
+        dateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
+        
+        // IMPORTANTE: O backend armazena no horário local do servidor (Brasil)
+        // Não fazer conversão para UTC - enviar o datetime como está no horário local
+        // Usar toISOString() que já inclui o timezone correto
+        const localDateTime = dateTime.toISOString()
+        
         const payload = {
           // tenant_id é inferido pelo backend a partir do token/header
           service_ids: selectedServices.map(s => s.id), // Array de IDs de serviços
@@ -722,7 +739,8 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
         {/* Calendário Interativo */}
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Data *
+            Data
+            {!isEditMode && ' *'}
           </label>
           <Card className="p-4">
             {/* Navegação do Calendário */}
@@ -810,7 +828,8 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
         {selectedDate && (
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">
-              {isEditMode ? 'Horário' : 'Horário Disponível'} *
+              {isEditMode ? 'Horário' : 'Horário Disponível'}
+              {!isEditMode && ' *'}
             </label>
             
             {isLoadingSlots ? (
@@ -1041,11 +1060,10 @@ const ManualAppointmentModal = ({ isOpen, onClose, services, onSuccess, appointm
             variant="primary"
             disabled={
               isSubmitting || 
-              !selectedTime || 
+              (!isEditMode && !selectedTime) || // Em modo criação, horário é obrigatório
               selectedServices.length === 0 || 
               (!isEditMode && (!customerName.trim() || !customerContact.trim())) ||
-              services.length === 0 ||
-              (isEditMode && !hasChanges) // Em modo edição, só permitir salvar se houver mudanças
+              services.length === 0
             }
             className="w-full sm:w-auto"
           >
