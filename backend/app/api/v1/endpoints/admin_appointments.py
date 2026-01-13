@@ -899,10 +899,15 @@ async def update_appointment(
             
             services_to_use.append(service)
             total_duration_minutes += service.duration_minutes
-            
-            # Calcular valor total (com promoções)
-            effective_price = Decimal(str(PromotionService.get_effective_price(service)))
-            total_value += effective_price
+        
+        # Recalcular valor total usando AppointmentService.calculate_total_value
+        # Isso garante que os valores estejam atualizados mesmo se o serviço foi editado
+        total_value = await AppointmentService.calculate_total_value(
+            db_session=db,
+            tenant_id=UUID(tenant_id_str),
+            service_ids=service_ids_to_use,
+            appointment_datetime=new_start_datetime
+        )
         
         # 2. Calcular novo horário de fim
         new_end_datetime = new_start_datetime + timedelta(minutes=total_duration_minutes)
