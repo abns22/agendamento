@@ -591,106 +591,132 @@ async def get_appointment_payment_details(
         
     Raises:
         HTTPException 404: Se o agendamento não for encontrado ou não pertencer ao tenant
+        HTTPException 500: Erro interno do servidor
     """
-    tenant_id_str = str(tenant.id) if tenant.id else None
-    appointment_id_str = str(appointment_id) if appointment_id else None
-    
-    # Buscar agendamento
-    appointment_result = await db.execute(
-        select(Appointment).where(
-            and_(
-                Appointment.id == appointment_id_str,
-                Appointment.tenant_id == tenant_id_str
+    try:
+        tenant_id_str = str(tenant.id) if tenant.id else None
+        appointment_id_str = str(appointment_id) if appointment_id else None
+        
+        # Buscar agendamento
+        appointment_result = await db.execute(
+            select(Appointment).where(
+                and_(
+                    Appointment.id == appointment_id_str,
+                    Appointment.tenant_id == tenant_id_str
+                )
             )
         )
-    )
-    appointment = appointment_result.scalar_one_or_none()
-    
-    if not appointment:
-        raise HTTPException(
-            status_code=404,
-            detail="Agendamento não encontrado"
-        )
-    
-    # Buscar transação relacionada
-    transaction_result = await db.execute(
-        select(Transaction).where(
-            and_(
-                Transaction.appointment_id == appointment_id_str,
-                Transaction.tenant_id == tenant_id_str
+        appointment = appointment_result.scalar_one_or_none()
+        
+        if not appointment:
+            raise HTTPException(
+                status_code=404,
+                detail="Agendamento não encontrado"
+            )
+        
+        # Buscar transação relacionada
+        transaction_result = await db.execute(
+            select(Transaction).where(
+                and_(
+                    Transaction.appointment_id == appointment_id_str,
+                    Transaction.tenant_id == tenant_id_str
+                )
             )
         )
-    )
-    transaction = transaction_result.scalar_one_or_none()
-    
-    if not transaction:
+        transaction = transaction_result.scalar_one_or_none()
+        
+        if not transaction:
+            return {
+                "has_payment": False,
+                "message": "Este agendamento não possui pagamento registrado"
+            }
+        
+        # Buscar payment entries com informações do método de pagamento
+        payment_entries = []
+        try:
+            payment_entries_result = await db.execute(
+                select(PaymentEntry, PaymentMethodConfig).join(
+                    PaymentMethodConfig,
+                    PaymentEntry.payment_method_id == PaymentMethodConfig.id
+                ).where(
+                    PaymentEntry.transaction_id == transaction.id
+                )
+            )
+            payment_entries_data = payment_entries_result.all()
+            
+            # Formatar payment entries
+            for payment_entry, payment_method in payment_entries_data:
+                payment_entries.append({
+                    "id": str(payment_entry.id),
+                    "payment_method_id": str(payment_entry.payment_method_id),
+                    "payment_method_name": payment_method.method_name,
+                    "value_paid": float(payment_entry.value_paid),
+                    "installments": payment_entry.installments,
+                    "is_bank_account": payment_entry.is_bank_account
+                })
+        except Exception as e:
+            logger.error(f"Erro ao buscar payment entries: {str(e)}", exc_info=True)
+            # Continuar mesmo se houver erro, apenas não terá payment entries
+        
+        # Buscar conta a receber (debtor) se houver
+        # Nota: Debtor não tem tenant_id, então buscamos apenas por transaction_id
+        debtor_info = None
+        try:
+            debtor_result = await db.execute(
+                select(Debtor).where(
+                    Debtor.transaction_id == transaction.id
+                )
+            )
+            debtor = debtor_result.scalar_one_or_none()
+            
+            if debtor:
+                debtor_info = {
+                    "id": str(debtor.id),
+                    "client_name": debtor.client_name,
+                    "client_phone": debtor.client_phone,
+                    "value_due": float(debtor.value_due) if debtor.value_due else None,
+                    "due_date": debtor.due_date.isoformat() if debtor.due_date else None,
+                    "status": debtor.status.value if debtor.status else None,
+                    "paid_at": debtor.paid_at.isoformat() if debtor.paid_at else None
+                }
+        except Exception as e:
+            logger.error(f"Erro ao buscar debtor: {str(e)}", exc_info=True)
+            # Continuar mesmo se houver erro, apenas não terá debtor info
+        
+        # Formatar dados da transação com tratamento de erros
+        try:
+            transaction_data = {
+                "id": str(transaction.id),
+                "date_time": transaction.date_time.isoformat() if transaction.date_time else None,
+                "gross_value": float(transaction.gross_value) if transaction.gross_value else 0.0,
+                "discount": float(transaction.discount) if transaction.discount else 0.0,
+                "net_value": float(transaction.net_value) if transaction.net_value else 0.0,
+                "total_cost": float(transaction.total_cost) if transaction.total_cost else 0.0,
+                "total_profit": float(transaction.total_profit) if transaction.total_profit else 0.0,
+                "additional_cost": float(transaction.additional_cost) if transaction.additional_cost else None,
+                "is_paid": transaction.is_paid if hasattr(transaction, 'is_paid') else True
+            }
+        except Exception as e:
+            logger.error(f"Erro ao formatar dados da transação: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erro ao processar dados da transação: {str(e)}"
+            )
+        
         return {
-            "has_payment": False,
-            "message": "Este agendamento não possui pagamento registrado"
+            "has_payment": True,
+            "transaction": transaction_data,
+            "payment_entries": payment_entries,
+            "debtor": debtor_info
         }
-    
-    # Buscar payment entries com informações do método de pagamento
-    payment_entries_result = await db.execute(
-        select(PaymentEntry, PaymentMethodConfig).join(
-            PaymentMethodConfig,
-            PaymentEntry.payment_method_id == PaymentMethodConfig.id
-        ).where(
-            PaymentEntry.transaction_id == transaction.id
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar detalhes de pagamento do agendamento {appointment_id_str}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao buscar detalhes de pagamento: {str(e)}"
         )
-    )
-    payment_entries_data = payment_entries_result.all()
-    
-    # Formatar payment entries
-    payment_entries = []
-    for payment_entry, payment_method in payment_entries_data:
-        payment_entries.append({
-            "id": str(payment_entry.id),
-            "payment_method_id": str(payment_entry.payment_method_id),
-            "payment_method_name": payment_method.method_name,
-            "value_paid": float(payment_entry.value_paid),
-            "installments": payment_entry.installments,
-            "is_bank_account": payment_entry.is_bank_account
-        })
-    
-    # Buscar conta a receber (debtor) se houver
-    debtor_result = await db.execute(
-        select(Debtor).where(
-            and_(
-                Debtor.transaction_id == transaction.id,
-                Debtor.tenant_id == tenant_id_str
-            )
-        )
-    )
-    debtor = debtor_result.scalar_one_or_none()
-    
-    debtor_info = None
-    if debtor:
-        debtor_info = {
-            "id": str(debtor.id),
-            "client_name": debtor.client_name,
-            "client_phone": debtor.client_phone,
-            "value_due": float(debtor.value_due) if debtor.value_due else None,
-            "due_date": debtor.due_date.isoformat() if debtor.due_date else None,
-            "status": debtor.status.value if debtor.status else None,
-            "paid_at": debtor.paid_at.isoformat() if debtor.paid_at else None
-        }
-    
-    return {
-        "has_payment": True,
-        "transaction": {
-            "id": str(transaction.id),
-            "date_time": transaction.date_time.isoformat(),
-            "gross_value": float(transaction.gross_value),
-            "discount": float(transaction.discount),
-            "net_value": float(transaction.net_value),
-            "total_cost": float(transaction.total_cost),
-            "total_profit": float(transaction.total_profit),
-            "additional_cost": float(transaction.additional_cost) if transaction.additional_cost else None,
-            "is_paid": transaction.is_paid
-        },
-        "payment_entries": payment_entries,
-        "debtor": debtor_info
-    }
 
 
 @router.put(
