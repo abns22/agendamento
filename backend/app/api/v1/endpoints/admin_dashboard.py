@@ -610,3 +610,151 @@ async def get_upcoming_appointments(
             detail=f"Erro ao buscar próximos agendamentos: {str(e)}"
         )
 
+
+class UpcomingDebtorItem(BaseModel):
+    """Item de conta a receber."""
+    id: str
+    client_name: str
+    value_due: Decimal
+    due_date: str  # Formato YYYY-MM-DD
+    due_date_label: str  # Label formatado (ex: "Hoje", "Amanhã", "15 de Janeiro", "Vencida")
+    is_overdue: bool  # True se está vencida
+    appointment_id: Optional[str] = None  # ID do agendamento relacionado
+
+
+class UpcomingDebtorsResponse(BaseModel):
+    """Resposta do endpoint de contas a receber."""
+    overdue: List[UpcomingDebtorItem]  # Contas vencidas
+    upcoming: List[UpcomingDebtorItem]  # Contas que vão vencer nos próximos 3 dias
+
+
+@router.get(
+    "/upcoming-debtors",
+    response_model=UpcomingDebtorsResponse,
+    summary="Obter contas a receber próximas e vencidas",
+    description="Retorna contas a receber que vão vencer nos próximos 3 dias e contas vencidas."
+)
+async def get_upcoming_debtors(
+    tenant: Tenant = Depends(verify_subscription_access),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retorna contas a receber que vão vencer nos próximos 3 dias e contas vencidas.
+    
+    Busca devedores com status PENDING onde:
+    - due_date < hoje (vencidas)
+    - due_date >= hoje e <= hoje + 3 dias (próximas)
+    
+    Args:
+        tenant: Tenant autenticado
+        db: Sessão do banco de dados
+        
+    Returns:
+        UpcomingDebtorsResponse: Contas vencidas e próximas
+    """
+    try:
+        tenant_id_str = str(tenant.id) if tenant.id else None
+        if not tenant_id_str:
+            raise HTTPException(status_code=400, detail="tenant_id inválido")
+        
+        # Calcular período usando timezone do Brasil
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        
+        brazil_tz = ZoneInfo('America/Sao_Paulo')
+        now_brazil = datetime.now(brazil_tz)
+        today_brazil = now_brazil.date()
+        
+        # Data limite: hoje + 3 dias
+        end_date_brazil = today_brazil + timedelta(days=3)
+        
+        # Buscar transações do tenant
+        transactions_query = select(Transaction.id, Transaction.appointment_id).where(
+            Transaction.tenant_id == tenant_id_str
+        )
+        transactions_result = await db.execute(transactions_query)
+        transactions = transactions_result.all()
+        
+        transaction_ids = [str(row[0]) for row in transactions]
+        transaction_to_appointment = {str(row[0]): str(row[1]) if row[1] else None for row in transactions}
+        
+        if not transaction_ids:
+            return UpcomingDebtorsResponse(overdue=[], upcoming=[])
+        
+        # Buscar devedores pendentes vinculados às transações do tenant
+        debtors_query = select(Debtor).where(
+            and_(
+                Debtor.transaction_id.in_(transaction_ids),
+                Debtor.status == DebtorStatus.PENDING
+            )
+        ).order_by(Debtor.due_date.asc())
+        
+        debtors_result = await db.execute(debtors_query)
+        debtors = debtors_result.scalars().all()
+        
+        # Função para formatar label da data
+        def format_date_label(due_date: date) -> str:
+            if due_date < today_brazil:
+                days_overdue = (today_brazil - due_date).days
+                if days_overdue == 1:
+                    return "Vencida há 1 dia"
+                else:
+                    return f"Vencida há {days_overdue} dias"
+            elif due_date == today_brazil:
+                return "Vence hoje"
+            elif due_date == today_brazil + timedelta(days=1):
+                return "Vence amanhã"
+            else:
+                months_pt = [
+                    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+                    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
+                ]
+                return f"Vence em {due_date.day} de {months_pt[due_date.month - 1]}"
+        
+        overdue_list = []
+        upcoming_list = []
+        
+        for debtor in debtors:
+            # Converter due_date para date se for datetime
+            if isinstance(debtor.due_date, datetime):
+                due_date = debtor.due_date.date()
+            else:
+                due_date = debtor.due_date
+            
+            # Verificar se está vencida ou próxima
+            is_overdue = due_date < today_brazil
+            is_upcoming = due_date >= today_brazil and due_date <= end_date_brazil
+            
+            if is_overdue or is_upcoming:
+                appointment_id = transaction_to_appointment.get(str(debtor.transaction_id))
+                
+                debtor_item = UpcomingDebtorItem(
+                    id=str(debtor.id),
+                    client_name=debtor.client_name,
+                    value_due=Decimal(str(debtor.value_due)),
+                    due_date=due_date.isoformat(),
+                    due_date_label=format_date_label(due_date),
+                    is_overdue=is_overdue,
+                    appointment_id=appointment_id
+                )
+                
+                if is_overdue:
+                    overdue_list.append(debtor_item)
+                else:
+                    upcoming_list.append(debtor_item)
+        
+        return UpcomingDebtorsResponse(
+            overdue=overdue_list,
+            upcoming=upcoming_list
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao buscar contas a receber: {str(e)}"
+        )
+

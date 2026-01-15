@@ -6,6 +6,7 @@ import { api, formatCurrency } from '../../utils/api'
 import ClientQuickRegisterModal from './ClientQuickRegisterModal'
 import BirthdaysSection from './BirthdaysSection'
 import UpcomingAppointmentsWidget from './UpcomingAppointmentsWidget'
+import UpcomingDebtorsWidget from './UpcomingDebtorsWidget'
 
 /**
  * Página de Dashboard Administrativo.
@@ -159,6 +160,9 @@ const DashboardPage = () => {
           </div>
         </Card>
       </div>
+
+      {/* Widget de Contas a Receber - Menor e mais minimalista */}
+      <UpcomingDebtorsWidget />
 
       {/* Widget de Próximos Agendamentos */}
       <UpcomingAppointmentsWidget />
