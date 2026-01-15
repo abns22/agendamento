@@ -43,6 +43,8 @@ const AgendaPage = () => {
   const [cancellationReason, setCancellationReason] = useState('')
   const [appointmentsSummary, setAppointmentsSummary] = useState(null)
   const [showAppointmentsSummary, setShowAppointmentsSummary] = useState(true)
+  const [paymentDetails, setPaymentDetails] = useState(null)
+  const [isLoadingPayment, setIsLoadingPayment] = useState(false)
   
   // Filtros - inicializar com valores padrão (serão sincronizados com URL via useEffect)
   // IMPORTANTE: Por padrão, mostrar apenas agendamentos futuros (do dia atual em diante)
@@ -363,9 +365,30 @@ const AgendaPage = () => {
   }, [])
 
   // Abrir modal de detalhes do agendamento
-  const handleAppointmentClick = (appointment) => {
+  const handleAppointmentClick = async (appointment) => {
     setSelectedAppointment(appointment)
     setIsModalOpen(true)
+    
+    // Se o agendamento estiver finalizado, buscar detalhes de pagamento
+    if (appointment.status === 'COMPLETED') {
+      await fetchPaymentDetails(appointment.id)
+    } else {
+      setPaymentDetails(null)
+    }
+  }
+  
+  // Buscar detalhes de pagamento
+  const fetchPaymentDetails = async (appointmentId) => {
+    try {
+      setIsLoadingPayment(true)
+      const response = await api.get(`/api/v1/admin/appointments/${appointmentId}/payment-details`)
+      setPaymentDetails(response.data)
+    } catch (err) {
+      console.error('Erro ao buscar detalhes de pagamento:', err)
+      setPaymentDetails(null)
+    } finally {
+      setIsLoadingPayment(false)
+    }
   }
 
   // Fechar modal
@@ -373,6 +396,7 @@ const AgendaPage = () => {
     setIsModalOpen(false)
     setSelectedAppointment(null)
     setSelectedService(null)
+    setPaymentDetails(null)
   }
 
   // Abrir modal de cancelamento
@@ -1022,6 +1046,150 @@ const AgendaPage = () => {
                 </p>
               </div>
             </div>
+
+            {/* Detalhes de Pagamento - Mostrar apenas se o agendamento estiver finalizado */}
+            {selectedAppointment.status === 'COMPLETED' && (
+              <div className="pt-4 border-t border-gray-200">
+                <p className="text-sm font-semibold text-gray-600 mb-3">Detalhes do Pagamento:</p>
+                {isLoadingPayment ? (
+                  <p className="text-sm text-gray-500">Carregando detalhes de pagamento...</p>
+                ) : paymentDetails?.has_payment ? (
+                  <div className="space-y-3 bg-gray-50 p-4 rounded-lg">
+                    {/* Informações da Transação */}
+                    {paymentDetails.transaction && (
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-semibold text-gray-700">Data e Hora:</span>
+                          <span className="text-sm text-gray-600">
+                            {formatDateTime(paymentDetails.transaction.date_time)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-semibold text-gray-700">Valor Bruto:</span>
+                          <span className="text-sm text-gray-600">
+                            {formatCurrency(paymentDetails.transaction.gross_value)}
+                          </span>
+                        </div>
+                        {paymentDetails.transaction.discount > 0 && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-semibold text-gray-700">Desconto:</span>
+                            <span className="text-sm text-red-600">
+                              - {formatCurrency(paymentDetails.transaction.discount)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center border-t border-gray-300 pt-2">
+                          <span className="text-sm font-bold text-gray-800">Valor Líquido:</span>
+                          <span className="text-sm font-bold text-green-600">
+                            {formatCurrency(paymentDetails.transaction.net_value)}
+                          </span>
+                        </div>
+                        {paymentDetails.transaction.additional_cost > 0 && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-semibold text-gray-700">Custo Adicional:</span>
+                            <span className="text-sm text-gray-600">
+                              {formatCurrency(paymentDetails.transaction.additional_cost)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-semibold text-gray-700">Lucro:</span>
+                          <span className="text-sm font-bold text-blue-600">
+                            {formatCurrency(paymentDetails.transaction.total_profit)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Formas de Pagamento */}
+                    {paymentDetails.payment_entries && paymentDetails.payment_entries.length > 0 && (
+                      <div className="mt-4 pt-3 border-t border-gray-300">
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Formas de Pagamento:</p>
+                        <div className="space-y-2">
+                          {paymentDetails.payment_entries.map((entry, idx) => (
+                            <div key={idx} className="flex justify-between items-center bg-white p-2 rounded">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-gray-700">{entry.payment_method_name}</span>
+                                {entry.installments && entry.installments > 1 && (
+                                  <span className="text-xs text-gray-500">
+                                    ({entry.installments}x)
+                                  </span>
+                                )}
+                                {entry.is_bank_account && (
+                                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                                    Conta Bancária
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-sm font-semibold text-gray-800">
+                                {formatCurrency(entry.value_paid)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Conta a Receber */}
+                    {paymentDetails.debtor && (
+                      <div className="mt-4 pt-3 border-t border-gray-300">
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Conta a Receber:</p>
+                        <div className="space-y-2 bg-yellow-50 p-3 rounded">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-700">Cliente:</span>
+                            <span className="text-sm font-semibold text-gray-800">
+                              {paymentDetails.debtor.client_name}
+                            </span>
+                          </div>
+                          {paymentDetails.debtor.client_phone && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-700">Telefone:</span>
+                              <span className="text-sm text-gray-600">
+                                {paymentDetails.debtor.client_phone}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-700">Valor Devido:</span>
+                            <span className="text-sm font-bold text-orange-600">
+                              {formatCurrency(paymentDetails.debtor.value_due)}
+                            </span>
+                          </div>
+                          {paymentDetails.debtor.due_date && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-700">Vencimento:</span>
+                              <span className="text-sm text-gray-600">
+                                {formatDateTime(paymentDetails.debtor.due_date)}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-700">Status:</span>
+                            <span className={`text-xs px-2 py-1 rounded ${
+                              paymentDetails.debtor.status === 'PAID' 
+                                ? 'bg-green-100 text-green-700' 
+                                : 'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {paymentDetails.debtor.status === 'PAID' ? 'Pago' : 'Pendente'}
+                            </span>
+                          </div>
+                          {paymentDetails.debtor.paid_at && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-700">Pago em:</span>
+                              <span className="text-sm text-gray-600">
+                                {formatDateTime(paymentDetails.debtor.paid_at)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">Este agendamento não possui pagamento registrado</p>
+                )}
+              </div>
+            )}
 
             {/* Ações */}
             {!selectedAppointment.is_manual_block && (

@@ -23,6 +23,9 @@ from app.models.service import Service
 from app.models.client import Client
 from app.models.payment_entry import PaymentEntry
 from app.models.schedule_config import ScheduleConfig
+from app.models.transaction import Transaction
+from app.models.payment_method_config import PaymentMethodConfig
+from app.models.debtor import Debtor
 import logging
 
 logger = logging.getLogger(__name__)
@@ -562,6 +565,132 @@ async def get_appointment(
         )
     
     return await build_appointment_response(appointment, db)
+
+
+@router.get(
+    "/{appointment_id}/payment-details",
+    response_model=dict,
+    summary="Obter detalhes de pagamento do agendamento",
+    description="Retorna os detalhes de pagamento de um agendamento finalizado e pago, incluindo transação, formas de pagamento e conta a receber (se houver)."
+)
+async def get_appointment_payment_details(
+    appointment_id: UUID = Path(..., description="UUID do agendamento"),
+    tenant: Tenant = Depends(verify_subscription_access),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Obtém os detalhes de pagamento de um agendamento finalizado e pago.
+    
+    Args:
+        appointment_id: UUID do agendamento
+        tenant: Tenant autenticado
+        db: Sessão do banco de dados
+        
+    Returns:
+        dict: Detalhes de pagamento incluindo transação, payment entries e conta a receber
+        
+    Raises:
+        HTTPException 404: Se o agendamento não for encontrado ou não pertencer ao tenant
+    """
+    tenant_id_str = str(tenant.id) if tenant.id else None
+    appointment_id_str = str(appointment_id) if appointment_id else None
+    
+    # Buscar agendamento
+    appointment_result = await db.execute(
+        select(Appointment).where(
+            and_(
+                Appointment.id == appointment_id_str,
+                Appointment.tenant_id == tenant_id_str
+            )
+        )
+    )
+    appointment = appointment_result.scalar_one_or_none()
+    
+    if not appointment:
+        raise HTTPException(
+            status_code=404,
+            detail="Agendamento não encontrado"
+        )
+    
+    # Buscar transação relacionada
+    transaction_result = await db.execute(
+        select(Transaction).where(
+            and_(
+                Transaction.appointment_id == appointment_id_str,
+                Transaction.tenant_id == tenant_id_str
+            )
+        )
+    )
+    transaction = transaction_result.scalar_one_or_none()
+    
+    if not transaction:
+        return {
+            "has_payment": False,
+            "message": "Este agendamento não possui pagamento registrado"
+        }
+    
+    # Buscar payment entries com informações do método de pagamento
+    payment_entries_result = await db.execute(
+        select(PaymentEntry, PaymentMethodConfig).join(
+            PaymentMethodConfig,
+            PaymentEntry.payment_method_id == PaymentMethodConfig.id
+        ).where(
+            PaymentEntry.transaction_id == transaction.id
+        )
+    )
+    payment_entries_data = payment_entries_result.all()
+    
+    # Formatar payment entries
+    payment_entries = []
+    for payment_entry, payment_method in payment_entries_data:
+        payment_entries.append({
+            "id": str(payment_entry.id),
+            "payment_method_id": str(payment_entry.payment_method_id),
+            "payment_method_name": payment_method.method_name,
+            "value_paid": float(payment_entry.value_paid),
+            "installments": payment_entry.installments,
+            "is_bank_account": payment_entry.is_bank_account
+        })
+    
+    # Buscar conta a receber (debtor) se houver
+    debtor_result = await db.execute(
+        select(Debtor).where(
+            and_(
+                Debtor.transaction_id == transaction.id,
+                Debtor.tenant_id == tenant_id_str
+            )
+        )
+    )
+    debtor = debtor_result.scalar_one_or_none()
+    
+    debtor_info = None
+    if debtor:
+        debtor_info = {
+            "id": str(debtor.id),
+            "client_name": debtor.client_name,
+            "client_phone": debtor.client_phone,
+            "value_due": float(debtor.value_due) if debtor.value_due else None,
+            "due_date": debtor.due_date.isoformat() if debtor.due_date else None,
+            "status": debtor.status.value if debtor.status else None,
+            "paid_at": debtor.paid_at.isoformat() if debtor.paid_at else None
+        }
+    
+    return {
+        "has_payment": True,
+        "transaction": {
+            "id": str(transaction.id),
+            "date_time": transaction.date_time.isoformat(),
+            "gross_value": float(transaction.gross_value),
+            "discount": float(transaction.discount),
+            "net_value": float(transaction.net_value),
+            "total_cost": float(transaction.total_cost),
+            "total_profit": float(transaction.total_profit),
+            "additional_cost": float(transaction.additional_cost) if transaction.additional_cost else None,
+            "is_paid": transaction.is_paid
+        },
+        "payment_entries": payment_entries,
+        "debtor": debtor_info
+    }
 
 
 @router.put(
