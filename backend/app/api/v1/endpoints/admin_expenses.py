@@ -84,7 +84,18 @@ async def list_expenses(
     
     # Aplicar filtro de método de pagamento
     if payment_method:
-        query = query.where(Expense.payment_method == payment_method)
+        # O FastAPI já converte o query parameter para o enum se for válido
+        # Se vier como string, converter explicitamente
+        if isinstance(payment_method, str):
+            try:
+                payment_method_enum = PaymentMethodEnum(payment_method.upper())
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Método de pagamento inválido: {payment_method}")
+        else:
+            payment_method_enum = payment_method
+        
+        # Comparar diretamente - o SQLAlchemy deve fazer o cast automaticamente
+        query = query.where(Expense.payment_method == payment_method_enum)
     
     # Ordenar por payment_date (mais recente primeiro)
     query = query.order_by(Expense.payment_date.desc())
