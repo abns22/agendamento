@@ -1234,18 +1234,6 @@ const AgendaPage = () => {
                   </Button>
                 )}
                 
-                {/* Reagendar - disponível para agendamentos não cancelados nem concluídos */}
-                {selectedAppointment.status !== 'CANCELED' && selectedAppointment.status !== 'COMPLETED' && (
-                  <Button
-                    variant="secondary"
-                    onClick={handleOpenRescheduleModal}
-                    disabled={isSubmitting || !selectedAppointment.service_id}
-                    className="w-full"
-                  >
-                    🔁 Reagendar
-                  </Button>
-                )}
-                
                 {(selectedAppointment.status === 'SCHEDULED' || selectedAppointment.status === 'CONFIRMED') && (
                   <Button
                     variant="primary"
