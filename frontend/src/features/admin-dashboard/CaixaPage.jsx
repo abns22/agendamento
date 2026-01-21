@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api, formatCurrency } from '../../utils/api'
 import { Card, Button, Input, Modal } from '../../components/ui'
 import DatePicker from 'react-datepicker'
@@ -15,28 +16,15 @@ import { ptBR } from 'date-fns/locale'
  * - Filtros por data, cliente e forma de pagamento
  */
 const CaixaPage = () => {
+  const navigate = useNavigate()
   const [cashSummary, setCashSummary] = useState(null)
   const [transactions, setTransactions] = useState([])
   const [isLoadingSummary, setIsLoadingSummary] = useState(true)
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(true)
-  const [isLoadingExpenses, setIsLoadingExpenses] = useState(true)
   const [error, setError] = useState(null)
   
   // Modo de visualização: 'daily' ou 'custom'
   const [viewMode, setViewMode] = useState('daily')
-  
-  // Despesas
-  const [expenses, setExpenses] = useState([])
-  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
-  const [isSubmittingExpense, setIsSubmittingExpense] = useState(false)
-  
-  // Formulário de despesa
-  const [expenseForm, setExpenseForm] = useState({
-    description: '',
-    value: '',
-    category: '',
-    date_time: new Date()
-  })
   
   // Filtros de data
   const [selectedDate, setSelectedDate] = useState(new Date()) // Modo Diário
@@ -56,16 +44,12 @@ const CaixaPage = () => {
     fetchTransactions()
   }, [viewMode, selectedDate, startDate, endDate, customerFilter, selectedPaymentMethod])
   
-  useEffect(() => {
-    fetchExpenses()
-  }, [viewMode, selectedDate, startDate, endDate])
-  
   const fetchCashSummary = async () => {
     try {
       setIsLoadingSummary(true)
       setError(null)
       
-      let url = '/api/v1/admin/reports/cash-summary?'
+      let url = '/api/v1/admin/reports/cash-summary-detailed?'
       const params = new URLSearchParams()
       
       if (viewMode === 'daily') {
@@ -100,90 +84,6 @@ const CaixaPage = () => {
       setPaymentMethods(response.data || [])
     } catch (err) {
       console.error('Erro ao carregar formas de pagamento:', err)
-    }
-  }
-  
-  const fetchExpenses = async () => {
-    try {
-      setIsLoadingExpenses(true)
-      const params = new URLSearchParams()
-      
-      // Se modo diário, usar selectedDate para ambos
-      if (viewMode === 'daily') {
-        const dateStr = format(selectedDate, 'yyyy-MM-dd')
-        params.append('start_date', dateStr)
-        params.append('end_date', dateStr)
-      } else {
-        // Modo período personalizado
-        if (startDate) {
-          params.append('start_date', format(startDate, 'yyyy-MM-dd'))
-        }
-        if (endDate) {
-          params.append('end_date', format(endDate, 'yyyy-MM-dd'))
-        }
-      }
-      
-      const response = await api.get(`/api/v1/admin/expenses?${params.toString()}`)
-      setExpenses(response.data || [])
-    } catch (err) {
-      console.error('Erro ao carregar despesas:', err)
-      setError(err.response?.data?.detail || 'Erro ao carregar despesas')
-    } finally {
-      setIsLoadingExpenses(false)
-    }
-  }
-  
-  const handleOpenExpenseModal = () => {
-    setExpenseForm({
-      description: '',
-      value: '',
-      category: '',
-      date_time: new Date()
-    })
-    setIsExpenseModalOpen(true)
-  }
-  
-  const handleCloseExpenseModal = () => {
-    setIsExpenseModalOpen(false)
-    setExpenseForm({
-      description: '',
-      value: '',
-      category: '',
-      date_time: new Date()
-    })
-  }
-  
-  const handleSubmitExpense = async (e) => {
-    e.preventDefault()
-    
-    if (!expenseForm.description.trim() || !expenseForm.value || parseFloat(expenseForm.value) <= 0) {
-      setError('Preencha a descrição e um valor válido')
-      return
-    }
-    
-    try {
-      setIsSubmittingExpense(true)
-      setError(null)
-      
-      const payload = {
-        description: expenseForm.description.trim(),
-        value: parseFloat(expenseForm.value),
-        category: expenseForm.category.trim() || null,
-        date_time: expenseForm.date_time.toISOString()
-      }
-      
-      await api.post('/api/v1/admin/expenses', payload)
-      
-      // Recarregar despesas e resumo
-      await fetchExpenses()
-      await fetchCashSummary()
-      
-      handleCloseExpenseModal()
-    } catch (err) {
-      console.error('Erro ao criar despesa:', err)
-      setError(err.response?.data?.detail || 'Erro ao criar despesa')
-    } finally {
-      setIsSubmittingExpense(false)
     }
   }
   
@@ -230,38 +130,23 @@ const CaixaPage = () => {
     return format(new Date(dateTime), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })
   }
   
-  const getPaymentMethodTotals = (summary) => {
-    if (!summary || !summary.payment_methods_summary) return {}
-    
-    const totals = {
-      cash: { name: 'Dinheiro', total: 0 },
-      pix: { name: 'PIX', total: 0 },
-      card: { name: 'Cartão/Conta Bancária', total: 0 }
-    }
-    
-    summary.payment_methods_summary.forEach(pm => {
-      const methodName = pm.method_name.toLowerCase()
-      const value = parseFloat(pm.total_received)
-      
-      if (methodName.includes('dinheiro') || methodName.includes('cash')) {
-        totals.cash.total += value
-      } else if (methodName.includes('pix')) {
-        totals.pix.total += value
-      } else if (pm.is_bank_account || methodName.includes('cartão') || methodName.includes('card')) {
-        totals.card.total += value
-      }
-    })
-    
-    return totals
-  }
-  
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-text">Caixa e Relatórios</h1>
-        <p className="text-gray-600 mt-1">
-          Acompanhe o faturamento, custos e lucro do seu estúdio
-        </p>
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-text">Caixa e Relatórios</h1>
+          <p className="text-gray-600 mt-1">
+            Acompanhe o faturamento, custos e lucro do seu estúdio
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          onClick={() => navigate('/admin/expenses')}
+          className="flex items-center gap-2"
+        >
+          <span>💸</span>
+          Gerenciar Despesas
+        </Button>
       </div>
       
       {/* Mensagem de erro */}
@@ -357,105 +242,165 @@ const CaixaPage = () => {
         </div>
       </Card>
       
-      {/* Resumo do Caixa */}
+      {/* Cards de Resumo do Caixa */}
       {isLoadingSummary ? (
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
         </div>
-      ) : cashSummary && cashSummary.summary ? (
-        <Card className="p-6">
-          <h2 className="text-xl font-bold text-text mb-4">
-            {cashSummary.is_daily ? '📅 Resumo Diário' : '📊 Resumo do Período'}
-          </h2>
-          {!cashSummary.is_daily && (
-            <p className="text-sm text-gray-600 mb-4">
-              Período: {format(new Date(cashSummary.period_start), 'dd/MM/yyyy', { locale: ptBR })} até{' '}
-              {format(new Date(cashSummary.period_end), 'dd/MM/yyyy', { locale: ptBR })}
-            </p>
-          )}
-          
-          <div className="space-y-4">
-            {/* Faturamento */}
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Faturamento</h3>
-              <div className="space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Bruto:</span>
-                  <span className="font-semibold">
-                    {formatCurrency(parseFloat(cashSummary.summary.gross_revenue))}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Líquido:</span>
-                  <span className="font-bold text-primary text-lg">
-                    {formatCurrency(parseFloat(cashSummary.summary.net_revenue))}
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            {/* Custos e Lucro */}
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Custos e Lucro</h3>
-              <div className="space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Custo Total:</span>
-                  <span className="font-semibold text-red-600">
-                    -{formatCurrency(parseFloat(cashSummary.summary.total_cost))}
-                  </span>
-                </div>
-                {parseFloat(cashSummary.summary.total_expenses) > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-600">Despesas:</span>
-                    <span className="font-semibold text-orange-600">
-                      -{formatCurrency(parseFloat(cashSummary.summary.total_expenses))}
-                    </span>
-                  </div>
-                )}
-                <div className="flex justify-between border-t border-gray-300 pt-1 mt-1">
-                  <span className="text-sm font-semibold">Lucro Bruto:</span>
-                  <span className="font-bold text-green-600">
-                    {formatCurrency(parseFloat(cashSummary.summary.total_profit))}
-                  </span>
-                </div>
-                {parseFloat(cashSummary.summary.total_expenses) > 0 && (
-                  <div className="flex justify-between border-t border-gray-300 pt-1 mt-1">
-                    <span className="text-sm font-semibold">Lucro Líquido:</span>
-                    <span className="font-bold text-blue-600 text-lg">
-                      {formatCurrency(
-                        parseFloat(cashSummary.summary.total_profit) - 
-                        parseFloat(cashSummary.summary.total_expenses)
-                      )}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-            
-            {/* Formas de Pagamento */}
-            <div className="bg-purple-50 p-4 rounded-lg">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Formas de Pagamento</h3>
-              <div className="space-y-1">
-                {(() => {
-                  const totals = getPaymentMethodTotals(cashSummary.summary)
-                  return Object.values(totals).map((method, idx) => (
-                    method.total > 0 && (
-                      <div key={idx} className="flex justify-between">
-                        <span className="text-sm text-gray-600">{method.name}:</span>
-                        <span className="font-semibold">{formatCurrency(method.total)}</span>
-                      </div>
-                    )
-                  ))
-                })()}
-              </div>
-            </div>
-            
-            {/* Estatísticas */}
-            <div className="text-xs text-gray-500 text-center pt-2 border-t border-gray-200">
-              {cashSummary.summary.total_transactions} transação(ões) • {cashSummary.summary.total_appointments} agendamento(s)
-            </div>
+      ) : cashSummary ? (
+        <div className="space-y-6">
+          {/* Cabeçalho do Período */}
+          <div>
+            <h2 className="text-xl font-bold text-text">
+              {cashSummary.period_type === 'daily' ? '📅 Resumo Diário' : '📊 Resumo do Período'}
+            </h2>
+            {cashSummary.period_type === 'custom' && (
+              <p className="text-sm text-gray-600 mt-1">
+                Período: {format(new Date(cashSummary.period_start), 'dd/MM/yyyy', { locale: ptBR })} até{' '}
+                {format(new Date(cashSummary.period_end), 'dd/MM/yyyy', { locale: ptBR })}
+              </p>
+            )}
           </div>
-        </Card>
+          
+          {/* Cards de Resumo */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Card 1: Saldo Geral Líquido */}
+            <Card className="p-6 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="text-3xl">💰</div>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700">Saldo Geral Líquido</h3>
+                  <p className="text-xs text-gray-500">Total consolidado</p>
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className={`text-3xl font-bold ${
+                  parseFloat(cashSummary.general.net_total || 0) >= 0 
+                    ? 'text-green-600' 
+                    : 'text-red-600'
+                }`}>
+                  {formatCurrency(parseFloat(cashSummary.general.net_total || 0))}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Bruto: {formatCurrency(parseFloat(cashSummary.general.gross_total || 0))}
+                </p>
+              </div>
+            </Card>
+            
+            {/* Card 2: Em Caixa (Dinheiro) */}
+            <Card className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-400">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="text-3xl">💵</div>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700">Em Caixa</h3>
+                  <p className="text-xs text-gray-500">Dinheiro físico</p>
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className={`text-3xl font-bold text-green-700`}>
+                  {formatCurrency(parseFloat(cashSummary.breakdown.physical_cash.balance || 0))}
+                </p>
+                {parseFloat(cashSummary.breakdown.physical_cash.expenses || 0) > 0 && (
+                  <p className="text-xs text-red-600 mt-1">
+                    Saídas: -{formatCurrency(parseFloat(cashSummary.breakdown.physical_cash.expenses || 0))}
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  Entradas: {formatCurrency(parseFloat(cashSummary.breakdown.physical_cash.income || 0))}
+                </p>
+              </div>
+            </Card>
+            
+            {/* Card 3: Em Banco (Digital) */}
+            <Card className="p-6 bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-400">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="text-3xl">🏦</div>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700">Em Banco</h3>
+                  <p className="text-xs text-gray-500">Digital/PIX/Cartões</p>
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className={`text-3xl font-bold text-purple-700`}>
+                  {formatCurrency(parseFloat(cashSummary.breakdown.bank_digital.balance || 0))}
+                </p>
+                {parseFloat(cashSummary.breakdown.bank_digital.expenses || 0) > 0 && (
+                  <p className="text-xs text-red-600 mt-1">
+                    Saídas: -{formatCurrency(parseFloat(cashSummary.breakdown.bank_digital.expenses || 0))}
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  Entradas: {formatCurrency(parseFloat(cashSummary.breakdown.bank_digital.income || 0))}
+                </p>
+              </div>
+            </Card>
+          </div>
+          
+          {/* Detalhamento por Método */}
+          <Card className="p-6">
+            <h3 className="text-lg font-bold text-text mb-4">📊 Detalhamento por Método</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              {/* PIX */}
+              {parseFloat(cashSummary.methods_detailed.pix || 0) > 0 && (
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                  <p className="text-sm font-semibold text-gray-700 mb-1">💳 PIX</p>
+                  <p className="text-xl font-bold text-blue-600">
+                    {formatCurrency(parseFloat(cashSummary.methods_detailed.pix || 0))}
+                  </p>
+                </div>
+              )}
+              
+              {/* Cartão de Crédito */}
+              {parseFloat(cashSummary.methods_detailed.credit_card || 0) > 0 && (
+                <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                  <p className="text-sm font-semibold text-gray-700 mb-1">💳 Crédito</p>
+                  <p className="text-xl font-bold text-purple-600">
+                    {formatCurrency(parseFloat(cashSummary.methods_detailed.credit_card || 0))}
+                  </p>
+                </div>
+              )}
+              
+              {/* Cartão de Débito */}
+              {parseFloat(cashSummary.methods_detailed.debit_card || 0) > 0 && (
+                <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-200">
+                  <p className="text-sm font-semibold text-gray-700 mb-1">💳 Débito</p>
+                  <p className="text-xl font-bold text-indigo-600">
+                    {formatCurrency(parseFloat(cashSummary.methods_detailed.debit_card || 0))}
+                  </p>
+                </div>
+              )}
+              
+              {/* Dinheiro */}
+              {parseFloat(cashSummary.methods_detailed.cash || 0) > 0 && (
+                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                  <p className="text-sm font-semibold text-gray-700 mb-1">💵 Dinheiro</p>
+                  <p className="text-xl font-bold text-green-600">
+                    {formatCurrency(parseFloat(cashSummary.methods_detailed.cash || 0))}
+                  </p>
+                </div>
+              )}
+              
+              {/* Transferência Bancária */}
+              {parseFloat(cashSummary.methods_detailed.bank_transfer || 0) > 0 && (
+                <div className="bg-teal-50 p-4 rounded-lg border border-teal-200">
+                  <p className="text-sm font-semibold text-gray-700 mb-1">🏦 Transferência</p>
+                  <p className="text-xl font-bold text-teal-600">
+                    {formatCurrency(parseFloat(cashSummary.methods_detailed.bank_transfer || 0))}
+                  </p>
+                </div>
+              )}
+            </div>
+            
+            {/* Mensagem se não houver dados */}
+            {parseFloat(cashSummary.methods_detailed.pix || 0) === 0 &&
+             parseFloat(cashSummary.methods_detailed.credit_card || 0) === 0 &&
+             parseFloat(cashSummary.methods_detailed.debit_card || 0) === 0 &&
+             parseFloat(cashSummary.methods_detailed.cash || 0) === 0 &&
+             parseFloat(cashSummary.methods_detailed.bank_transfer || 0) === 0 && (
+              <p className="text-gray-500 text-center py-4">Nenhum pagamento registrado neste período.</p>
+            )}
+          </Card>
+        </div>
       ) : (
         <Card className="p-6">
           <p className="text-gray-500 text-center py-8">
@@ -589,105 +534,6 @@ const CaixaPage = () => {
           </div>
         )}
       </Card>
-      
-      {/* Modal de Lançamento de Despesa */}
-      <Modal
-        isOpen={isExpenseModalOpen}
-        onClose={handleCloseExpenseModal}
-        title="Lançar Despesa"
-      >
-        <form onSubmit={handleSubmitExpense} className="space-y-4">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
-          
-          {/* Descrição */}
-          <div>
-            <label className="block text-sm font-semibold text-text mb-2">
-              Descrição *
-            </label>
-            <textarea
-              value={expenseForm.description}
-              onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
-              placeholder="Ex: Compra de material de limpeza"
-              required
-              rows={3}
-              className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary"
-              disabled={isSubmittingExpense}
-            />
-          </div>
-          
-          {/* Valor */}
-          <div>
-            <label className="block text-sm font-semibold text-text mb-2">
-              Valor (R$) *
-            </label>
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              value={expenseForm.value}
-              onChange={(e) => setExpenseForm({ ...expenseForm, value: e.target.value })}
-              placeholder="0.00"
-              required
-              disabled={isSubmittingExpense}
-            />
-          </div>
-          
-          {/* Categoria */}
-          <div>
-            <label className="block text-sm font-semibold text-text mb-2">
-              Categoria
-            </label>
-            <input
-              type="text"
-              value={expenseForm.category}
-              onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
-              placeholder="Ex: Aluguel, Material, Salário"
-              maxLength={100}
-              className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary"
-              disabled={isSubmittingExpense}
-            />
-          </div>
-          
-          {/* Data */}
-          <div>
-            <label className="block text-sm font-semibold text-text mb-2">
-              Data
-            </label>
-            <DatePicker
-              selected={expenseForm.date_time}
-              onChange={(date) => setExpenseForm({ ...expenseForm, date_time: date })}
-              dateFormat="dd/MM/yyyy"
-              className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary"
-              locale={ptBR}
-            />
-          </div>
-          
-          {/* Botões */}
-          <div className="flex gap-3 pt-4">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleCloseExpenseModal}
-              disabled={isSubmittingExpense}
-              className="flex-1"
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={isSubmittingExpense}
-              className="flex-1"
-            >
-              {isSubmittingExpense ? 'Salvando...' : 'Salvar Despesa'}
-            </Button>
-          </div>
-        </form>
-      </Modal>
     </div>
   )
 }

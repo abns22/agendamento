@@ -1,10 +1,20 @@
 """
 Modelo SQLAlchemy para a entidade Expense (Despesa).
 """
-from sqlalchemy import Column, String, ForeignKey, DateTime, DECIMAL, Text
+from sqlalchemy import Column, String, ForeignKey, DateTime, DECIMAL, Text, Enum
+from enum import Enum as PyEnum
 import uuid
 from datetime import datetime
 from app.core.database import Base
+
+
+class PaymentMethodEnum(PyEnum):
+    """Enum para métodos de pagamento de despesas."""
+    CASH = "CASH"
+    CREDIT_CARD = "CREDIT_CARD"
+    DEBIT_CARD = "DEBIT_CARD"
+    PIX = "PIX"
+    BANK_TRANSFER = "BANK_TRANSFER"
 
 
 class Expense(Base):
@@ -16,13 +26,14 @@ class Expense(Base):
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
-    description = Column(Text, nullable=False)  # Descrição da despesa
-    value = Column(DECIMAL(10, 2), nullable=False)  # Valor da despesa
-    category = Column(String(100), nullable=True)  # Categoria (ex: Aluguel, Material, Salário)
-    date_time = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)  # Data/hora da despesa (UTC)
+    description = Column(Text, nullable=False)  # Descrição da despesa (Ex: "Conta de Luz")
+    item_name = Column(String(200), nullable=True)  # Nome do item comprado (opcional)
+    amount = Column(DECIMAL(10, 2), nullable=False)  # Valor da despesa
+    payment_method = Column(Enum(PaymentMethodEnum), nullable=False, index=True)  # Método de pagamento
+    payment_date = Column(DateTime, nullable=False, index=True)  # Data em que o dinheiro saiu do caixa
+    category = Column(String(100), nullable=True)  # Categoria (ex: 'FIXO', 'VARIAVEL')
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     def __repr__(self):
-        return f"<Expense(id={self.id}, tenant_id={self.tenant_id}, value={self.value}, category='{self.category}')>"
+        return f"<Expense(id={self.id}, tenant_id={self.tenant_id}, amount={self.amount}, payment_method='{self.payment_method}')>"
 

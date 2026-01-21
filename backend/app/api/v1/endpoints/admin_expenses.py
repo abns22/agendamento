@@ -3,15 +3,15 @@ Endpoints administrativos para gerenciamento de Despesas.
 """
 from fastapi import APIRouter, HTTPException, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from uuid import UUID
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.core.database import get_db
 from app.core.dependencies import verify_subscription_access
 from app.models.tenant import Tenant
-from app.models.expense import Expense
+from app.models.expense import Expense, PaymentMethodEnum
 
 from app.schemas.expense import ExpenseCreate, ExpenseUpdate, ExpenseResponse
 
@@ -22,12 +22,13 @@ router = APIRouter(prefix="/admin/expenses", tags=["Admin - Expenses"])
     "",
     response_model=List[ExpenseResponse],
     summary="Listar despesas",
-    description="Retorna todas as despesas do tenant autenticado, opcionalmente filtradas por período."
+    description="Retorna todas as despesas do tenant autenticado filtradas por período obrigatório e filtros opcionais."
 )
 async def list_expenses(
-    start_date: Optional[str] = Query(None, description="Data inicial (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="Data final (YYYY-MM-DD)"),
-    category: Optional[str] = Query(None, description="Filtrar por categoria"),
+    start_date: str = Query(..., description="Data inicial (YYYY-MM-DD) - obrigatório"),
+    end_date: str = Query(..., description="Data final (YYYY-MM-DD) - obrigatório"),
+    search: Optional[str] = Query(None, description="Busca em descrição ou item_name (opcional)"),
+    payment_method: Optional[PaymentMethodEnum] = Query(None, description="Filtrar por método de pagamento (opcional)"),
     tenant: Tenant = Depends(verify_subscription_access),
     db: AsyncSession = Depends(get_db)
 ):
@@ -35,45 +36,58 @@ async def list_expenses(
     Lista todas as despesas do tenant.
     
     Args:
-        start_date: Data inicial para filtrar (opcional)
-        end_date: Data final para filtrar (opcional)
-        category: Categoria para filtrar (opcional)
+        start_date: Data inicial para filtrar (obrigatório)
+        end_date: Data final para filtrar (obrigatório)
+        search: Busca em descrição ou item_name (opcional)
+        payment_method: Método de pagamento para filtrar (opcional)
         tenant: Tenant autenticado
         db: Sessão do banco de dados
         
     Returns:
-        List[ExpenseResponse]: Lista de despesas ordenadas por data (mais recente primeiro)
+        List[ExpenseResponse]: Lista de despesas ordenadas por payment_date (mais recente primeiro)
     """
     tenant_id_str = str(tenant.id) if tenant.id else None
     if not tenant_id_str:
         raise HTTPException(status_code=400, detail="tenant_id inválido")
     
-    query = select(Expense).where(Expense.tenant_id == tenant_id_str)
+    # Validar e converter datas
+    try:
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d').replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d').replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Datas devem estar no formato YYYY-MM-DD")
     
-    # Aplicar filtros
-    if start_date:
-        try:
-            start_dt = datetime.strptime(start_date, '%Y-%m-%d').replace(
-                hour=0, minute=0, second=0, microsecond=0
+    if start_dt > end_dt:
+        raise HTTPException(status_code=400, detail="Data de início deve ser anterior ou igual à data de fim")
+    
+    query = select(Expense).where(
+        and_(
+            Expense.tenant_id == tenant_id_str,
+            Expense.payment_date >= start_dt,
+            Expense.payment_date <= end_dt
+        )
+    )
+    
+    # Aplicar filtro de busca (em description ou item_name)
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.where(
+            or_(
+                Expense.description.ilike(search_pattern),
+                Expense.item_name.ilike(search_pattern)
             )
-            query = query.where(Expense.date_time >= start_dt)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="start_date deve estar no formato YYYY-MM-DD")
+        )
     
-    if end_date:
-        try:
-            end_dt = datetime.strptime(end_date, '%Y-%m-%d').replace(
-                hour=23, minute=59, second=59, microsecond=999999
-            )
-            query = query.where(Expense.date_time <= end_dt)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="end_date deve estar no formato YYYY-MM-DD")
+    # Aplicar filtro de método de pagamento
+    if payment_method:
+        query = query.where(Expense.payment_method == payment_method)
     
-    if category:
-        query = query.where(Expense.category == category)
-    
-    # Ordenar por data (mais recente primeiro)
-    query = query.order_by(Expense.date_time.desc())
+    # Ordenar por payment_date (mais recente primeiro)
+    query = query.order_by(Expense.payment_date.desc())
     
     result = await db.execute(query)
     expenses = result.scalars().all()
@@ -108,20 +122,23 @@ async def create_expense(
     if not tenant_id_str:
         raise HTTPException(status_code=400, detail="tenant_id inválido")
     
-    # Se date_time não for fornecido, usar data/hora atual (timezone-naive para compatibilidade com PostgreSQL)
-    expense_date_time = expense_data.date_time
-    if not expense_date_time:
-        expense_date_time = datetime.utcnow()
-    elif expense_date_time.tzinfo is not None:
-        # Remover timezone se presente (converter para UTC e remover tzinfo)
-        expense_date_time = expense_date_time.replace(tzinfo=None)
+    # Validar que o valor é positivo
+    if expense_data.amount <= 0:
+        raise HTTPException(status_code=400, detail="O valor da despesa deve ser positivo")
+    
+    # Converter payment_date para timezone-naive se necessário
+    payment_date = expense_data.payment_date
+    if payment_date.tzinfo is not None:
+        payment_date = payment_date.replace(tzinfo=None)
     
     new_expense = Expense(
         tenant_id=tenant_id_str,
         description=expense_data.description,
-        value=expense_data.value,
-        category=expense_data.category,
-        date_time=expense_date_time
+        item_name=expense_data.item_name,
+        amount=expense_data.amount,
+        payment_method=expense_data.payment_method,
+        payment_date=payment_date,
+        category=expense_data.category
     )
     
     db.add(new_expense)
@@ -227,16 +244,21 @@ async def update_expense(
     # Atualizar campos fornecidos
     if update_data.description is not None:
         expense.description = update_data.description
-    if update_data.value is not None:
-        expense.value = update_data.value
+    if update_data.item_name is not None:
+        expense.item_name = update_data.item_name
+    if update_data.amount is not None:
+        if update_data.amount <= 0:
+            raise HTTPException(status_code=400, detail="O valor da despesa deve ser positivo")
+        expense.amount = update_data.amount
+    if update_data.payment_method is not None:
+        expense.payment_method = update_data.payment_method
+    if update_data.payment_date is not None:
+        payment_date = update_data.payment_date
+        if payment_date.tzinfo is not None:
+            payment_date = payment_date.replace(tzinfo=None)
+        expense.payment_date = payment_date
     if update_data.category is not None:
         expense.category = update_data.category
-    if update_data.date_time is not None:
-        expense_date_time = update_data.date_time
-        if expense_date_time.tzinfo is not None:
-            # Remover timezone se presente (converter para UTC e remover tzinfo)
-            expense_date_time = expense_date_time.replace(tzinfo=None)
-        expense.date_time = expense_date_time
     
     await db.commit()
     await db.refresh(expense)
